@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS=		-Wall -g -O2 -Wno-unused -std=gnu99 -D_GNU_SOURCE
-CPPFLAGS=	-DHAVE_KALLOC
+CPPFLAGS=	#-DHAVE_KALLOC
 INCLUDES=
 OBJS=		kthread.o kalloc.o misc.o bseq.o sketch.o sdust.o options.o index.o chain.o align.o hit.o map.o format.o pe.o esterr.o ksw2_ll_sse.o fpga_sim.o user_to_drv.o context_data.o stat.o
 PROG=		minimap2

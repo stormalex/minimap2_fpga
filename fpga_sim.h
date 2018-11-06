@@ -24,10 +24,10 @@
 //#define DEBUG_API
 //#define DUMP_FILES
 #define RUN_ON_X86_DP
-#define RUN_ON_X86_SW
+//#define RUN_ON_X86_SW
 #define RUN_ON_X86_OT
 
-#define FPGA_ON    0       //1:hardware    0:soft
+#define FPGA_ON    1       //1:hardware    0:soft
 
 typedef enum
 {

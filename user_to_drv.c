@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <pthread.h>
 #include "ksw2.h"
 #include "kalloc.h"
 
@@ -246,7 +247,6 @@ int dma_sw2_prepare(uint32_t magic, uint16_t tid, uint8_t lat, uint16_t num, uin
 }//end func
 
 
-
 void proc_dp(vsc_ring_buf_t *ring_buf)
 {
     dp_to_ring_t *snd_data = 0;
@@ -360,6 +360,9 @@ void proc_sw(vsc_ring_buf_t *ring_buf)
     return;
 }
 
+pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
+int cxx = 0;
+
 void proc_sw2(vsc_ring_buf_t *ring_buf)
 {
     sw_to_ring_t *snd_data = 0;
@@ -374,7 +377,7 @@ void proc_sw2(vsc_ring_buf_t *ring_buf)
         clock_gettime(CLOCK_MONOTONIC, &tv);
         swring->magic = tv.tv_nsec;
 
-	int swcount = 0;
+        int swcount = 0;
         int hdrsize = sizeof(sw_sndhdr_t);
         //if (snd_data->factnum > 0) 
         {
@@ -384,7 +387,7 @@ void proc_sw2(vsc_ring_buf_t *ring_buf)
                 if (0 == read->longsw)
                 {
                     sw_reghdr_t *cr = &read->reg;
-		    swcount += (!!get_left(cr->midnum) + !!get_right(cr->midnum) + clear_midnum(cr->midnum));
+                    swcount += (!!get_left(cr->midnum) + !!get_right(cr->midnum) + clear_midnum(cr->midnum));
                     hdrsize += (!!get_left(cr->midnum) + !!get_right(cr->midnum) + clear_midnum(cr->midnum))*sizeof(sw_to_fpga_t);
                 }
                 else 
@@ -400,18 +403,21 @@ void proc_sw2(vsc_ring_buf_t *ring_buf)
         }
 
         int memsize = hdrsize + snd_data->total_size;
+        sw_sndhdr_t *dest = NULL;
+        if(memsize > 4096) {
 #ifdef RUN_ON_X86_SW
-        //sim alloc mem from driver API
-        sw_sndhdr_t *dest = (sw_sndhdr_t *)kmalloc(snd_data->km, memsize);
+            //sim alloc mem from driver API
+            dest = (sw_sndhdr_t *)kmalloc(snd_data->km, memsize);
 #else
-        sw_sndhdr_t *dest = fpga_get_writebuf(memsize, BUF_TYPE_SW);
-        fprintf(stderr, "fpga_get_writebuf dest=%p\n", dest);
+            dest = fpga_get_writebuf(memsize, BUF_TYPE_SW);
+            fprintf(stderr, "fpga_get_writebuf dest=%p\n", dest);
 #endif
-        set_swstat(snd_data->factnum, memsize);
-        dma_sw2_prepare(snd_data->magic,snd_data->tid, snd_data->lastblk, snd_data->factnum, memsize, dest, snd_data->data, snd_data->km);
-        //update factnum
-        dest->num -= swring->factnum;
-	dest->swcount = swcount;
+            set_swstat(snd_data->factnum, memsize);
+            dma_sw2_prepare(snd_data->magic,snd_data->tid, snd_data->lastblk, snd_data->factnum, memsize, dest, snd_data->data, snd_data->km);
+            //update factnum
+            dest->num -= swring->factnum;
+            dest->swcount = swcount;
+        }
         if (swring->factnum > 0) sw_ring_submit(swring, x86_ctrl.sw_ring_buf);
         else kfree(snd_data->km, swring);
 #ifdef DUMP_FILES
@@ -425,14 +431,21 @@ void proc_sw2(vsc_ring_buf_t *ring_buf)
             dumpfile(memsize, dest, fpn, drn);
         }
 #endif
-
+        if(memsize > 4096) {
 #ifdef RUN_ON_X86_SW
-        //sim fpga
-        calc_sw(dest, snd_data->km, snd_data->opt);
-        kfree(snd_data->km, dest);
+            //sim fpga
+            calc_sw(dest, snd_data->km, snd_data->opt);
+            kfree(snd_data->km, dest);
 #else 
-        fpga_writebuf_submit(dest, memsize, TYPE_SW);
+            /*pthread_mutex_lock(&file_mutex);
+            FILE* fp = fopen("./sw_in.bin", "ab+");
+            fwrite(&memsize, 4, 1, fp);
+            fwrite(dest, 1, memsize, fp);
+            fclose(fp);
+            pthread_mutex_unlock(&file_mutex);*/
+            fpga_writebuf_submit(dest, memsize, TYPE_SW);
 #endif
+        }
         //free x86 mem
         //fprintf(stderr, "free ring ptr %p,idx %d\n", snd_data,idx);
         kfree(snd_data->km, snd_data);
@@ -551,7 +564,9 @@ void* task_recver(void *param)
         int size = 0;
         int type = RET_TYPE_SW;
         void *ret = fpga_get_retbuf(&size, RET_TYPE_SW);
-        if (0 == ret || 0 == size) {continue;}
+        if (0 == ret || 0 == size) {
+            continue;
+        }
 
         uint64_t *dest = (uint64_t *)kmalloc(0, size+8/*8B is for km ptr*/);
         if (0 == dest) {fpga_release_retbuf(ret); continue;}

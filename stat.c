@@ -62,5 +62,6 @@ void set_dpstat(int memsize)
 
 void out_dpstat(void)
 {
-    fprintf(stderr, "DP STAT: batch %u, max mem %lu, min %lu, avg %lu\n", DP_BATCHSIZE, dp_max_memsize, dp_min_memsize, dp_avg_memsize/dp_callnums);
+    if(dp_callnums != 0)
+        fprintf(stderr, "DP STAT: batch %u, max mem %lu, min %lu, avg %lu\n", DP_BATCHSIZE, dp_max_memsize, dp_min_memsize, dp_avg_memsize/dp_callnums);
 }

@@ -710,7 +710,12 @@ int dp_consumer(void *topt, int tid)
                     read->ctxpos = swpos;
                     //fprintf(stderr, "dp consumer prepare avi %d,regseq %d,nregs %d,magic %u,swpos %d\n",avi,curr->n_regs0_swdone,curr->n_regs0,swring->magic,swpos);
                     uint32_t size = mm_align_skeleton_pre(curr->b->km, opt, curr->mi, curr->qseq0, curr->qlens[0], curr->qseqs[0], &curr->n_regs0, curr->regs0, curr->a, curr->regctx, read, swpos, curr->n_regs0_swdone, curr->n_a);
-                    if (size>0) /*read->regnum = 1,*/ swring->factnum++, swring->total_size += size;
+                    if (size>0)
+                    {
+                        /*read->regnum = 1,*/
+                        swring->factnum++;
+                        swring->total_size += size;
+                    }
 
                     curr->enable = 3;
                     unavi_pos[unavi++] = swpos;
@@ -732,7 +737,8 @@ int dp_consumer(void *topt, int tid)
 
         }//for c<avi
 
-        for (int k=0; k<unavi; k++) put_to_ring_buf_st(left_sw_pos[tid], (void *)unavi_pos[k]);
+        for (int k=0; k<unavi; k++)
+            put_to_ring_buf_st(left_sw_pos[tid], (void *)unavi_pos[k]);
 
         if (swring->factnum > 0) sw_ring_submit(swring, snd_ctrl.sw_ring_buf);
         else kfree(newkm, swring);

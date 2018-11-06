@@ -399,14 +399,13 @@ int main(int argc, char *argv[])
 	x86_ctrl.stop = 1;
 	for (int k=0; k<sim_threads; k++) pthread_join(dpsnd[k], 0);
 	for (int k=0; k<n_threads; k++) pthread_join(swsim[k], 0);
-
 #if FPGA_ON
-    pthread_join(*dprcv, 0);
+    fpga_exit_block();
+    pthread_join(dprcv[0], 0);
     free(dprcv);
 #endif
     free(swsim);
     free(dpsnd);
-
 
 	//free at last, as maybe using...
 	ring_free(snd_ctrl.dp_ring_buf);
@@ -417,7 +416,6 @@ int main(int argc, char *argv[])
 
 	deinit_leftp();
 	deinit_data_lock();
-
 #if FPGA_ON
 	fpga_finalize();
 #endif

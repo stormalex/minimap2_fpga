@@ -42,6 +42,7 @@ int fpga_init_sw(void* parameters);
 
 int fpga_send_sw(int id, int qlen, char* q, int tlen, char* t);
 
+void fpga_exit_block();
 
 void fpga_test(void);
 
