@@ -2,9 +2,6 @@
 #define KSW2_H_
 
 #include <stdint.h>
-#include <stdlib.h>
-
-#define REV_CIGAR_FPGA   (0xA0B1C2D3)
 
 #define KSW_NEG_INF -0x40000000
 
@@ -24,16 +21,13 @@ extern "C" {
 #endif
 
 typedef struct {
-	int n_cigar;
 	uint32_t max:31, zdropped:1;
 	int max_q, max_t;      // max extension coordinate
 	int mqe, mqe_t;        // max score when reaching the end of query
 	int mte, mte_q;        // max score when reaching the end of target
 	int score;             // max score reaching both ends; may be KSW_NEG_INF
+	int m_cigar, n_cigar;
 	int reach_end;
-	int m_cigar;
-	int revcigar;
-	int pad8B[2];
 	uint32_t *cigar;
 } ksw_extz_t;
 
@@ -64,8 +58,6 @@ void ksw_extd(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t 
 			  int8_t gapo, int8_t gape, int8_t gapo2, int8_t gape2, int w, int zdrop, int flag, ksw_extz_t *ez);
 
 void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
-				   int8_t gapo, int8_t gape, int8_t gapo2, int8_t gape2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez);
-void ksw_extd2(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
 				   int8_t gapo, int8_t gape, int8_t gapo2, int8_t gape2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez);
 
 void ksw_exts2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
@@ -102,10 +94,10 @@ int ksw_ll_i16(void *q, int tlen, const uint8_t *target, int gapo, int gape, int
 #include "kalloc.h"
 #else
 #include <stdlib.h>
-#define kmalloc(km, size) malloc(size)
-#define kcalloc(km, count, size) calloc(count, size)
-#define krealloc(km, ptr, size) realloc(ptr, size)
-#define kfree(km, ptr) free(ptr)
+#define kmalloc(km, size) malloc((size))
+#define kcalloc(km, count, size) calloc((count), (size))
+#define krealloc(km, ptr, size) realloc((ptr), (size))
+#define kfree(km, ptr) free((ptr))
 #endif
 
 static inline uint32_t *ksw_push_cigar(void *km, int *n_cigar, int *m_cigar, uint32_t *cigar, uint32_t op, int len)
@@ -152,11 +144,9 @@ static inline void ksw_backtrack(void *km, int is_rot, int is_rev, int min_intro
 	}
 	if (i >= 0) cigar = ksw_push_cigar(km, &n_cigar, &m_cigar, cigar, min_intron_len > 0 && i >= min_intron_len? 3 : 2, i + 1); // first deletion
 	if (j >= 0) cigar = ksw_push_cigar(km, &n_cigar, &m_cigar, cigar, 1, j + 1); // first insertion
-	/*
 	if (!is_rev)
 		for (i = 0; i < n_cigar>>1; ++i) // reverse CIGAR
 			tmp = cigar[i], cigar[i] = cigar[n_cigar-1-i], cigar[n_cigar-1-i] = tmp;
-	*/
 	*m_cigar_ = m_cigar, *n_cigar_ = n_cigar, *cigar_ = cigar;
 }
 
@@ -165,7 +155,6 @@ static inline void ksw_reset_extz(ksw_extz_t *ez)
 	ez->max_q = ez->max_t = ez->mqe_t = ez->mte_q = -1;
 	ez->max = 0, ez->score = ez->mqe = ez->mte = KSW_NEG_INF;
 	ez->n_cigar = 0, ez->zdropped = 0, ez->reach_end = 0;
-	ez->revcigar = 0;
 }
 
 static inline int ksw_apply_zdrop(ksw_extz_t *ez, int is_rot, int32_t H, int a, int b, int zdrop, int8_t e)
@@ -184,33 +173,5 @@ static inline int ksw_apply_zdrop(ksw_extz_t *ez, int is_rot, int32_t H, int a, 
 		}
 	}
 	return 0;
-}
-#define MINUS_INF KSW_NEG_INF
-typedef struct {
-	int32_t h, e, e2;
-} eh_t;
-static inline int64_t max(int64_t a, int64_t b)
-{
-    return a>b?a:b;
-}
-static inline int64_t max5(int64_t a, int64_t b, int64_t c, int64_t d, int64_t e)
-{
-    int64_t m = a;
-    if(m<b)m=b;
-    if(m<c)m=c;
-    if(m<d)m=d;
-    if(m<e)m=e;
-    return m;
-}
-static inline uint32_t *push_cigar(void *km, int *n_cigar, int *m_cigar, uint32_t *cigar, int op, int len)
-{
-	if (*n_cigar == 0 || op != (cigar[(*n_cigar) - 1]&0xf)) {
-		if (*n_cigar == *m_cigar) {
-			*m_cigar = *m_cigar? (*m_cigar)<<1 : 4;
-			cigar = (uint32_t *)krealloc(km, cigar, (*m_cigar) << 2);
-		}
-		cigar[(*n_cigar)++] = len<<4 | op;
-	} else cigar[(*n_cigar)-1] += len<<4;
-	return cigar;
 }
 #endif

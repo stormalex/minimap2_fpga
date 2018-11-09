@@ -1,8 +1,7 @@
-CC = gcc
-CFLAGS=		-Wall -g -O2 -Wno-unused -std=gnu99 -D_GNU_SOURCE
-CPPFLAGS=	#-DHAVE_KALLOC
+CFLAGS=		-g -Wall -O2 -Wc++-compat
+CPPFLAGS=	-DHAVE_KALLOC
 INCLUDES=
-OBJS=		kthread.o kalloc.o misc.o bseq.o sketch.o sdust.o options.o index.o chain.o align.o hit.o map.o format.o pe.o esterr.o ksw2_ll_sse.o fpga_sim.o user_to_drv.o context_data.o stat.o
+OBJS=		kthread.o kalloc.o misc.o bseq.o sketch.o sdust.o options.o index.o chain.o align.o hit.o map.o format.o pe.o esterr.o ksw2_ll_sse.o
 PROG=		minimap2
 PROG_EXTRA=	sdust minimap2-lite
 LIBS=		-lm -lz -lpthread
@@ -30,7 +29,7 @@ all:$(PROG)
 extra:all $(PROG_EXTRA)
 
 minimap2:main.o getopt.o libminimap2.a
-		$(CC) $(CFLAGS) main.o getopt.o -o $@ -L. -lminimap2 -lfpgadrv $(LIBS)
+		$(CC) $(CFLAGS) main.o getopt.o -o $@ -L. -lminimap2 $(LIBS)
 
 minimap2-lite:example.o libminimap2.a
 		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap2 $(LIBS)
@@ -83,7 +82,7 @@ ksw2_exts2_neon.o:ksw2_exts2_sse.c ksw2.h kalloc.h
 # other non-file targets
 
 clean:
-		rm -fr gmon.out *.o a.out $(PROG) $(PROG_EXTRA) *~ libminimap2.a *.dSYM build dist mappy*.so mappy.c python/mappy.c mappy.egg*
+		rm -fr gmon.out *.o a.out $(PROG) $(PROG_EXTRA) *~ *.a *.dSYM build dist mappy*.so mappy.c python/mappy.c mappy.egg*
 
 depend:
 		(LC_ALL=C; export LC_ALL; makedepend -Y -- $(CFLAGS) $(CPPFLAGS) -- *.c)

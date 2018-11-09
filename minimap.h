@@ -147,10 +147,6 @@ typedef struct {
 } mm_idx_reader_t;
 
 // memory buffer for thread-local storage during mapping
-struct mm_tbuf_s {
-        void *km;
-};
-
 typedef struct mm_tbuf_s mm_tbuf_t;
 
 // global variables

@@ -4,7 +4,6 @@
 #include "minimap.h"
 #include "mmpriv.h"
 #include "kalloc.h"
-#include "fpga_sim.h"
 
 static const char LogTable256[256] = {
 #define LT(n) n, n, n, n, n, n, n, n, n, n, n, n, n, n, n, n
@@ -74,19 +73,18 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 				if (++n_skip > max_skip)
 					break;
 			}
-            if ((p[j]<<1) >= 0) t[(p[j]<<1>>1)] = i;
+			if (p[j] >= 0) t[p[j]] = i;
 		}
-		f[i] = max_f, p[i] = max_j & 0x7fffffff;
+		f[i] = max_f, p[i] = max_j;
 		v[i] = max_j >= 0 && v[max_j] > max_f? v[max_j] : max_f; // v[] keeps the peak score up to i; f[] is the score ending at i, not always the peak
-        if (max_j >= 0) p[max_j] = p[max_j] | 0x80000000;
 	}
 
 	// find the ending positions of chains
 	memset(t, 0, n * 4);
-	//for (i = 0; i < n; ++i)
-	//	if (p[i] >= 0) t[p[i]] = 1;
+	for (i = 0; i < n; ++i)
+		if (p[i] >= 0) t[p[i]] = 1;
 	for (i = n_u = 0; i < n; ++i)
-		if ((p[i]>>31) == 0 && v[i] >= min_sc)
+		if (t[i] == 0 && v[i] >= min_sc)
 			++n_u;
 	if (n_u == 0) {
 		kfree(km, a); kfree(km, f); kfree(km, p); kfree(km, t); kfree(km, v);
@@ -94,9 +92,9 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 	}
 	u = (uint64_t*)kmalloc(km, n_u * 8);
 	for (i = n_u = 0; i < n; ++i) {
-		if ((p[i]>>31) == 0 && v[i] >= min_sc) {
+		if (t[i] == 0 && v[i] >= min_sc) {
 			j = i;
-			while (j >= 0 && f[j] < v[j]) j = p[j]<<1>>1; // find the peak that maximizes f[]
+			while (j >= 0 && f[j] < v[j]) j = p[j]; // find the peak that maximizes f[]
 			if (j < 0) j = i; // TODO: this should really be assert(j>=0)
 			u[n_u++] = (uint64_t)f[j] << 32 | j;
 		}
@@ -115,7 +113,7 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 		do {
 			v[n_v++] = j;
 			t[j] = 1;
-			j = p[j]<<1>>1;
+			j = p[j];
 		} while (j >= 0 && t[j] == 0);
 		if (j < 0) {
 			if (n_v - n_v0 >= min_cnt) u[k++] = u[i]>>32<<32 | (n_v - n_v0);
@@ -155,119 +153,5 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 	memcpy(u, u2, n_u * 8);
 	memcpy(b, a, k * sizeof(mm128_t)); // write _a_ to _b_ and deallocate _a_ because _a_ is oversized, sometimes a lot
 	kfree(km, a); kfree(km, w); kfree(km, u2);
-	return b;
-}
-
-
-//left find position
-mm128_t *mm_chain_dp_fpos(int min_cnt, int min_sc, int32_t n_u, int64_t n, int32_t *f, pv_t *pv, mm128_t *a, int *n_u_, uint64_t **_u, void *km)
-{ // TODO: make sure this works when n has more than 32 bits
-	int32_t k, n_v;
-	int64_t i, j;
-	uint64_t *u, *u2;
-	mm128_t *b, *w;
-
-	if (_u) *_u = 0, *n_u_ = 0;
-	if (0 == n_u) return 0;
-
-	u = (uint64_t*)kmalloc(km, n_u * 8);
-	for (i = n_u = 0; i < n; ++i) {
-		if ((pv[i].p>>31) == 0 && pv[i].v >= min_sc) {
-			j = i;
-			while (j >= 0 && f[j] < pv[j].v) j = pv[j].p<<1>>1; // find the peak that maximizes f[]
-			if (j < 0) j = i; // TODO: this should really be assert(j>=0)
-			u[n_u++] = (uint64_t)f[j] << 32 | j;
-		}
-	}
-	radix_sort_64(u, u + n_u);
-	for (i = 0; i < n_u>>1; ++i) { // reverse, s.t. the highest scoring chain is the first
-		uint64_t t = u[i];
-		u[i] = u[n_u - i - 1], u[n_u - i - 1] = t;
-	}
-
-	// backtrack
-    int32_t *t = (int32_t*)kmalloc(km, n * 4);
-	memset(t, 0, n * 4);
-	for (i = n_v = k = 0; i < n_u; ++i) { // starting from the highest score
-		int32_t n_v0 = n_v, k0 = k;
-		j = (int32_t)u[i];
-		do {
-			pv[n_v++].v = j;
-			t[j] = 1;
-			j = pv[j].p<<1>>1;
-		} while (j >= 0 && t[j] == 0);
-		if (j < 0) {
-			if (n_v - n_v0 >= min_cnt) u[k++] = u[i]>>32<<32 | (n_v - n_v0);
-		} else if ((int32_t)(u[i]>>32) - f[j] >= min_sc) {
-			if (n_v - n_v0 >= min_cnt) u[k++] = ((u[i]>>32) - f[j]) << 32 | (n_v - n_v0);
-		}
-		if (k0 == k) n_v = n_v0; // no new chain added, reset
-	}
-	*n_u_ = n_u = k, *_u = u; // NB: note that u[] may not be sorted by score here
-
-
-	// write the result to b[]
-	b = (mm128_t*)kmalloc(km, n_v * sizeof(mm128_t));
-	for (i = 0, k = 0; i < n_u; ++i) {
-		int32_t k0 = k, ni = (int32_t)u[i];
-		for (j = 0; j < ni; ++j)
-			b[k] = a[pv[k0 + (ni - j - 1)].v], ++k;
-	}
-
-	// sort u[] and a[] by a[].x, such that adjacent chains may be joined (required by mm_join_long)
-	w = (mm128_t*)kmalloc(km, n_u * sizeof(mm128_t));
-	for (i = k = 0; i < n_u; ++i) {
-		w[i].x = b[k].x, w[i].y = (uint64_t)k<<32|i;
-		k += (int32_t)u[i];
-	}
-	radix_sort_128x(w, w + n_u);
-	u2 = (uint64_t*)kmalloc(km, n_u * 8);
-	for (i = k = 0; i < n_u; ++i) {
-		int32_t j = (int32_t)w[i].y, n = (int32_t)u[j];
-		u2[i] = u[j];
-		memcpy(&a[k], &b[w[i].y>>32], n * sizeof(mm128_t));
-		k += n;
-	}
-	memcpy(u, u2, n_u * 8);
-	memcpy(b, a, k * sizeof(mm128_t)); // write _a_ to _b_ and deallocate _a_ because _a_ is oversized, sometimes a lot
-	kfree(km, w); kfree(km, u2);
-
-    kfree(km, t);
-
-	return b;
-}
-
-
-mm128_t *mm_chain_dp_sort(int n_u, uint64_t *u, int n_v, int32_t *v, mm128_t *a, void *km)
-{
-	// write the result to b[]
-	mm128_t *b = (mm128_t*)kmalloc(km, n_v * sizeof(mm128_t));
-	int64_t i,j,k;
-	for (i = 0, k = 0; i < n_u; ++i) {
-		int32_t k0 = k, ni = (int32_t)u[i];
-		for (j = 0; j < ni; ++j)
-			b[k] = a[v[k0 + (ni - j - 1)]], ++k;
-	}
-	kfree(km, v);
-
-	// sort u[] and a[] by a[].x, such that adjacent chains may be joined (required by mm_join_long)
-	mm128_t *w = (mm128_t*)kmalloc(km, n_u * sizeof(mm128_t));
-	for (i = k = 0; i < n_u; ++i) {
-		w[i].x = b[k].x, w[i].y = (uint64_t)k<<32|i;
-		k += (int32_t)u[i];
-	}
-	radix_sort_128x(w, w + n_u);
-	uint64_t *u2 = (uint64_t*)kmalloc(km, n_u * 8);
-	for (i = k = 0; i < n_u; ++i) {
-		int32_t j = (int32_t)w[i].y, n = (int32_t)u[j];
-		u2[i] = u[j];
-		memcpy(&a[k], &b[w[i].y>>32], n * sizeof(mm128_t));
-		k += n;
-	}
-	memcpy(u, u2, n_u * 8);
-	memcpy(b, a, k * sizeof(mm128_t)); // write _a_ to _b_ and deallocate _a_ because _a_ is oversized, sometimes a lot
-
-	kfree(km, a); kfree(km, w); kfree(km, u2);
-
 	return b;
 }

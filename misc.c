@@ -2,7 +2,7 @@
 #include "mmpriv.h"
 
 int mm_verbose = 1;
-int mm_dbg_flag = 0;//MM_DBG_NO_KALLOC;
+int mm_dbg_flag = 0;
 double mm_realtime0;
 
 #if defined(WIN32) || defined(_WIN32)

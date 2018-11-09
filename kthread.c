@@ -1,7 +1,6 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <limits.h>
-#include <stdio.h>
 #include <stdint.h>
 #include "kthread.h"
 
@@ -14,24 +13,11 @@
  ************/
 
 struct kt_for_t;
-struct kt_for_cb_t;
-struct kt_for_clone_t;
 
 typedef struct {
 	struct kt_for_t *t;
 	long i;
 } ktf_worker_t;
-
-typedef struct {
-	struct kt_for_clone_t *t;
-	long i;
-} ktf_worker_clone_t;
-
-typedef struct {
-	struct kt_for_cb_t *t;
-	long i;
-} ktf_worker_cb_t;
-
 
 typedef struct kt_for_t {
 	int n_threads;
@@ -41,27 +27,6 @@ typedef struct kt_for_t {
 	void *data;
 } kt_for_t;
 
-
-typedef struct kt_for_clone_t {
-	int n_threads;
-	long n;
-	ktf_worker_clone_t *w;
-        int (*func)(void*, int);
-	void *data;
-} kt_for_clone_t;
-
-
-typedef struct kt_for_cb_t {
-	int n_threads;
-        int e_threads;//exited thread num
-	long n;
-	ktf_worker_cb_t *w;
-	void (*func)(void*,long,int);
-	void *data;
-        void (*last)(void);
-} kt_for_cb_t;
-
-
 static inline long steal_work(kt_for_t *t)
 {
 	int i, min_i = -1;
@@ -70,27 +35,6 @@ static inline long steal_work(kt_for_t *t)
 		if (min > t->w[i].i) min = t->w[i].i, min_i = i;
 	k = __sync_fetch_and_add(&t->w[min_i].i, t->n_threads);
 	return k >= t->n? -1 : k;
-}
-
-static inline long steal_work_cb(kt_for_cb_t *t)
-{
-	int i, min_i = -1;
-	long k, min = LONG_MAX;
-	for (i = 0; i < t->n_threads; ++i)
-		if (min > t->w[i].i) min = t->w[i].i, min_i = i;
-	k = __sync_fetch_and_add(&t->w[min_i].i, t->n_threads);
-	return k >= t->n? -1 : k;
-}
-
-static void *ktf_worker_clone(void *data)
-{
-	ktf_worker_clone_t *w = (ktf_worker_clone_t*)data;
-	//long i;
-	for (;;) {
-	        int r = w->t->func(w->t->data, w - w->t->w);
-		if (r < 0) break;
-	}
-	pthread_exit(0);
 }
 
 static void *ktf_worker(void *data)
@@ -104,24 +48,6 @@ static void *ktf_worker(void *data)
 	}
 	while ((i = steal_work(w->t)) >= 0)
 		w->t->func(w->t->data, i, w - w->t->w);
-	pthread_exit(0);
-}
-
-static void *ktf_worker_cb(void *data)
-{
-	ktf_worker_cb_t *w = (ktf_worker_cb_t*)data;
-	long i;
-	for (;;) {
-		i = __sync_fetch_and_add(&w->i, w->t->n_threads);
-		if (i >= w->t->n) break;
-		w->t->func(w->t->data, i, w - w->t->w);
-	}
-	while ((i = steal_work_cb(w->t)) >= 0)
-		w->t->func(w->t->data, i, w - w->t->w);
-
-	int k = __sync_add_and_fetch(&w->t->e_threads, 1);
-	if (k == w->t->n_threads) w->t->last();
-
 	pthread_exit(0);
 }
 
@@ -142,67 +68,6 @@ void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
 	} else {
 		long j;
 		for (j = 0; j < n; ++j) func(data, j, 0);
-	}
-}
-
-void kt_for_nowait(int n_threads, void (*func)(void*,long,int), void *data, long n, void (*last)(void), pthread_t **tidptr, void **wptr, void **kfptr)
-{
-	kt_for_cb_t *t;
-	pthread_t *tid;
-
-	//init
-	*tidptr = 0;
-	*wptr   = 0;
-	*kfptr = 0;
-	t = (kt_for_cb_t *)calloc(1, sizeof(kt_for_cb_t));
-
-	if (n_threads >= 1) {
-		int i;
-		t->func = func, t->data = data, t->n_threads = n_threads, t->n = n;
-		t->last = last, t->e_threads = 0;
-		t->w = (ktf_worker_cb_t*)calloc(n_threads, sizeof(ktf_worker_cb_t));
-		tid = (pthread_t*)calloc(n_threads, sizeof(pthread_t));
-		for (i = 0; i < n_threads; ++i)
-			t->w[i].t = t, t->w[i].i = i;
-		for (i = 0; i < n_threads; ++i) pthread_create(&tid[i], 0, ktf_worker_cb, &t->w[i]);
-		//for (i = 0; i < n_threads; ++i) pthread_join(tid[i], 0);
-		//free(tid); free(t.w);
-		*tidptr = tid;
-		*wptr   = t->w;
-		*kfptr = t;
-	} else {
-		long j;
-		for (j = 0; j < n; ++j) func(data, j, 0);
-	}
-}
-
-void kt_for_nowait_clone(int n_threads, int (*func)(void*, int), void *data, pthread_t **tidptr, void**wptr, void **kfptr)
-{
-	kt_for_clone_t *t;
-	pthread_t *tid;
-
-	//init
-	*tidptr = 0;
-	*wptr   = 0;
-	*kfptr  = 0;
-	t = (kt_for_clone_t *)calloc(1, sizeof(kt_for_clone_t));
-
-	if (n_threads >= 1) {
-		int i;
-		t->func = func, t->data = data, t->n_threads = n_threads;
-		t->w = (ktf_worker_clone_t*)calloc(n_threads, sizeof(ktf_worker_clone_t));
-		tid = (pthread_t*)calloc(n_threads, sizeof(pthread_t));
-		for (i = 0; i < n_threads; ++i)
-			t->w[i].t = t, t->w[i].i = i;
-
-		for (i = 0; i < n_threads; ++i) pthread_create(&tid[i], 0, ktf_worker_clone, &t->w[i]);
-		//for (i = 0; i < n_threads; ++i) pthread_join(tid[i], 0);
-		//free(tid); free(t.w);
-		*tidptr = tid;
-		*wptr   = t->w;
-		*kfptr  = t;
-	} else {
-		for (;;) if (func(data, 0) < 0) break;
 	}
 }
 
