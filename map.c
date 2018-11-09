@@ -16,6 +16,7 @@
 #include "context_data.h"
 
 #include "user_common.h"
+#include "fpga.h"
 
 mm_tbuf_t *mm_tbuf_init(void)
 {
@@ -400,6 +401,7 @@ void reverse_cigar(int n_cigar, uint32_t *cigar)
     tmp = cigar[i],cigar[i]=cigar[n_cigar-1-i],cigar[n_cigar-1-i]=tmp;
 }
 
+unsigned long long sw_consumer_t[100];
 static int sw_consumer(void *topt, int tid)
 {
     const mm_idx_t *mi;
@@ -411,13 +413,25 @@ static int sw_consumer(void *topt, int tid)
     int n_regs0, rep_len;
     const mm_mapopt_t *opt = (const mm_mapopt_t *)topt;
     int is_sr = !!(opt->flag & MM_F_SR);;
-
+    struct timespec t1, t2;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
 
     swtest_rcvhdr_t *ret = 0;
     get_from_ring_buf(rcv_ctrl.sw_ring_buf, (void **)&ret);
     if (!ret) {
-        if (get_stat_dpthrd()/*lastblk_comeback_sw() && (add_rsp_sw(0) == add_req_sw(0))*/) {fprintf(stderr, "....tid %d..sw consumer exit....hhahahahah.....\n",tid);return -1;}
-        else return 0;
+        if (get_stat_dpthrd()/*lastblk_comeback_sw() && (add_rsp_sw(0) == add_req_sw(0))*/) {
+            //fprintf(stderr, "....tid %d..sw consumer exit....hhahahahah.....\n",tid);
+            clock_gettime(CLOCK_MONOTONIC, &t2);
+            unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+            sw_consumer_t[tid] += ta;
+            return -1;
+        }
+        else {
+            clock_gettime(CLOCK_MONOTONIC, &t2);
+            unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+            sw_consumer_t[tid] += ta;
+            return 0;
+        }
     }
 
     void *km = ret->km;
@@ -425,7 +439,7 @@ static int sw_consumer(void *topt, int tid)
     add_rsp_sw(1);
     if (IS_LAST == ret->lat) set_last_flag_sw(ret->lat);//avoid rewrite by NT_LAST
 
-    fprintf(stderr, "sw consumer begn! magic %d,factnum %d,size %u,mytid %d, dptid %d,last %d,req %u,rsp %u\n",ret->magic,ret->num,ret->size,tid,ret->tid,lastblk_comeback_sw(),add_req_sw(0),add_rsp_sw(0));
+    //fprintf(stderr, "sw consumer begn! magic %d,factnum %d,size %u,mytid %d, dptid %d,last %d,req %u,rsp %u\n",ret->magic,ret->num,ret->size,tid,ret->tid,lastblk_comeback_sw(),add_req_sw(0),add_rsp_sw(0));
 
     for (int k=0; k<ret->num; k++) {
         sw_readhdr_t *dr = ret->data + k;
@@ -494,11 +508,12 @@ static int sw_consumer(void *topt, int tid)
 		    if (REV_CIGAR_FPGA == ez->revcigar) reverse_cigar(ez->n_cigar, ez->cigar);
                     ez->m_cigar = get_power_2_big(ez->n_cigar);
                     if ((zdrop_code = mm_test_zdrop(b->km, opt, zqseq, ztseq, ez->n_cigar, ez->cigar, mat)) != 0) {
-
+                        
                         mm_align_pair(b->km, opt, zctx->qe-zctx->qs, zqseq, zctx->re-zctx->rs, ztseq, mat, zctx->bw1, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, zctx->extra_flag, ez);
+                        
                         //fprintf(stderr, "mid zdrop,qlen %d,tlen %d,bw %d,endbos %d,zcode %d, zinv %d,zdrop %d,factzdrop %d,flag %x,ez max %d,zdrp %d,maxq %d,maxt %d,mqe %d,mqet %d,score %d,ncig %d,reaend %d\n",zctx->qe-zctx->qs,zctx->re-zctx->rs,zctx->bw1,-1,zdrop_code,opt->zdrop_inv,opt->zdrop,zdrop_code == 2?opt->zdrop_inv : opt->zdrop,zctx->extra_flag,ez->max,ez->zdropped,ez->max_q,ez->max_t,ez->mqe,ez->mqe_t,ez->score,ez->n_cigar,ez->reach_end);
 
-		    if (REV_CIGAR_FPGA == ez->revcigar) reverse_cigar(ez->n_cigar, ez->cigar);
+                        if (REV_CIGAR_FPGA == ez->revcigar) reverse_cigar(ez->n_cigar, ez->cigar);
                     }
                     // update CIGAR
                     if (ez->n_cigar > 0)
@@ -564,7 +579,8 @@ static int sw_consumer(void *topt, int tid)
             if (ii > 0 && regs0[ii].split_inv) {
                 ksw_extz_t ez;
                 memset(&ez, 0, sizeof(ksw_extz_t));
-                if (mm_align1_inv(km, opt, mi, qlens[0], qseq0, &regs0[ii-1], &regs0[ii], r2, &ez)) {
+                int ret = mm_align1_inv(km, opt, mi, qlens[0], qseq0, &regs0[ii-1], &regs0[ii], r2, &ez);
+                if (ret) {
                     regs0 = mm_insert_reg(r2, ii, &n_regs0, regs0);
                     ++swctx->n_regs0_swdone;
                     kfree(km, ez.cigar);
@@ -573,9 +589,9 @@ static int sw_consumer(void *topt, int tid)
             }
             if (n_regs0 >= swctx->n_regs0_cap) {
                 swctx->n_regs0_cap <<= 1;
-		fprintf(stderr, "reg realloc, regctx %p, size %d\n", swctx->regctx,swctx->n_regs0_cap*sizeof(reg_context_t));
+                //fprintf(stderr, "reg realloc, regctx %p, size %d\n", swctx->regctx,swctx->n_regs0_cap*sizeof(reg_context_t));
                 swctx->regctx = (reg_context_t *)krealloc(b->km, swctx->regctx, swctx->n_regs0_cap*sizeof(reg_context_t));
-		fprintf(stderr, "reg realloc done!\n");
+                //fprintf(stderr, "reg realloc done!\n");
             }
             //TODO: free regs0 first???
             swctx->regs0   = regs0;
@@ -623,13 +639,16 @@ static int sw_consumer(void *topt, int tid)
         if (0 != swctx->enable) swctx->enable = 1;
     }
 #endif
-    fprintf(stderr, "sw consumer done! magic %d,mytid %d,ret tid %d\n",ret->magic,tid,ret->tid);
+    //fprintf(stderr, "sw consumer done! magic %d,mytid %d,ret tid %d\n",ret->magic,tid,ret->tid);
 
     kfree(km, ret);
-
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+    unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+    sw_consumer_t[tid] += ta;
     return 0;
 }
 
+unsigned long long dp_consumer_t[100];
 int dp_consumer(void *topt, int tid)
 {
     int i,j;
@@ -650,6 +669,9 @@ int dp_consumer(void *topt, int tid)
     char **seqs;
     void *newkm = 0;
 
+    struct timespec t1, t2;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    
     n_segs = 1;
     int unavi = 0, avi = 0;
     int unavi_pos[SW_LFT_NUM] = {0}, avi_pos[DP_BATCHSIZE] = {0};
@@ -740,10 +762,12 @@ int dp_consumer(void *topt, int tid)
         for (int k=0; k<unavi; k++)
             put_to_ring_buf_st(left_sw_pos[tid], (void *)unavi_pos[k]);
 
-        if (swring->factnum > 0) sw_ring_submit(swring, snd_ctrl.sw_ring_buf);
+        if (swring->factnum > 0) {
+            sw_ring_submit(swring, snd_ctrl.sw_ring_buf);
+        }
         else kfree(newkm, swring);
        
-        if (swring->factnum > 0) fprintf(stderr, "ring submit comp! magic %d,factnum %u,avi %d,unavi %d,size %d,tid %d,last %d from left\n",swring->magic,swring->factnum,avi,unavi,swring->total_size,swring->tid,swring->lastblk);
+        //if (swring->factnum > 0) fprintf(stderr, "ring submit comp! magic %d,factnum %u,avi %d,unavi %d,size %d,tid %d,last %d from left\n",swring->magic,swring->factnum,avi,unavi,swring->total_size,swring->tid,swring->lastblk);
     }//if avi>0
 
     //restore unavi for thread exit condition
@@ -751,8 +775,18 @@ int dp_consumer(void *topt, int tid)
 	dptest_rcvhdr_t *hdr = 0;
 	get_from_ring_buf(rcv_ctrl.dp_ring_buf, (void **)&hdr);
 	if (!hdr) {
-        if ((0 == unavi + avi) && lastblk_comeback() && (add_rsp(0) == add_req(0))) return -1;
-        else return 0;
+        if ((0 == unavi + avi) && lastblk_comeback() && (add_rsp(0) == add_req(0))) {
+            clock_gettime(CLOCK_MONOTONIC, &t2);
+            unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+            dp_consumer_t[tid] += ta;
+            return -1;
+        }
+        else {
+            clock_gettime(CLOCK_MONOTONIC, &t2);
+            unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+            dp_consumer_t[tid] += ta;
+            return 0;
+        }
 	}
     
 	add_rsp(hdr->num);
@@ -885,8 +919,10 @@ int dp_consumer(void *topt, int tid)
       
       //fprintf(stderr, "dp consumer done! last %d,tid %d,put %d new reads to left ring\n",hdr->lat&IS_LAST,tid,unavi);
       kfree(newkm, hdr);
-	
-      return 0;
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+    unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+    dp_consumer_t[tid] += ta;
+    return 0;
 }
 
 
@@ -918,11 +954,15 @@ typedef struct {
 	mm_tbuf_t **buf;
 } step_t;
 
+unsigned long long worker_for_t[100];
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
 	step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];
+    struct timespec t1, t2;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    
 	mm_tbuf_t *b = s->buf[tid];
 	assert(s->n_seg[i] <= MM_MAX_SEG);
 	if (mm_dbg_flag & MM_DBG_PRINT_QNAME)
@@ -975,10 +1015,16 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 				r->rev = !r->rev;
 			}
 		}
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+    unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+    
+    worker_for_t[tid] += ta;
 }
-
+unsigned long long step_1_t[100];
+static unsigned int worker_count = 0;
 static void *worker_pipeline(void *shared, int step, void *in)
 {
+    //fprintf(stderr, "########worker_pipeline\n");
     int i, j, k;
     pipeline_t *p = (pipeline_t*)shared;
     if (step == 0) { // step 0: read sequences
@@ -1009,6 +1055,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
+        //fprintf(stderr, "[AAA]\n");
+        struct timespec t1, t2;
+        clock_gettime(CLOCK_MONOTONIC, &t1);
         set_reqrsp_zero();
 		set_reqrsp_zero_sw();
 		set_stat_dpthrd(0);
@@ -1038,17 +1087,20 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			free(tid1); free(tw1); free(kf1);
 		}
 		set_stat_dpthrd(1);
-		fprintf(stderr, "dp consumer exit!\n");
+		//fprintf(stderr, "dp consumer exit!\n");
 #ifndef DEBUG_API
 		if (tid2 && tw2 && kf2) {
 			for (int i = 0; i < p->n_threads; ++i) pthread_join(tid2[i], 0);
 			free(tid2); free(tw2); free(kf2);
 		}
 #endif
-		fprintf(stderr, "sw consumer exit!all thread exit in step1\n\n\n");
+		//fprintf(stderr, "sw consumer exit!all thread exit in step1\n\n\n");
 		set_last_flag(0);
 		set_last_flag_sw(0);
-
+        
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+        step_1_t[worker_count++] += ta;
 		return in;
     } else if (step == 2) { // step 2: output
 		void *km = 0;
@@ -1116,7 +1168,13 @@ int mm_map_file_frag(const mm_idx_t *idx, int n_segs, const char **fn, const mm_
 	pl.n_threads = n_threads > 1? n_threads : 1;
 	pl.mini_batch_size = opt->mini_batch_size;
 	pl_threads = n_threads == 1? 1 : (opt->flag&MM_F_2_IO_THREADS)? 3 : 2;
+    struct timespec t1, t2;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
 	kt_pipeline(pl_threads, worker_pipeline, &pl, 3);
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+    unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+    //fprintf(stderr, "worker_pipeline time=%llu ms\n", ta/1000000);
+    
 	free(pl.str.s);
 	for (i = 0; i < n_segs; ++i)
 		mm_bseq_close(pl.fp[i]);

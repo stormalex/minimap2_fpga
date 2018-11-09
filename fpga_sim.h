@@ -14,7 +14,8 @@
 #define SW_LFT_NUM          DP_CTX_NUM
 //#define SW_SUBMIT_MEMSIZE   (2^28)//256MB
 
-#define MAX_DP_THRD         (DP_QUEUE_NUM/DP_BATCHSIZE)
+//#define MAX_DP_THRD         (DP_QUEUE_NUM/DP_BATCHSIZE)
+#define MAX_DP_THRD     20
 
 #define UNAVAILABLE_ADDR    (0xdeaddeaddeaddead)
 //#define REV_CIGAR_FPGA      (0xA0B1C2D3)

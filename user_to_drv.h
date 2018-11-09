@@ -81,9 +81,15 @@ typedef struct
     vsc_ring_buf_t *sw_ring_buf;
 } thread_ctrl_t ;
 
+typedef struct {
+    int id;
+    pthread_t tid;
+    thread_ctrl_t* ring_buf;
+}thread_param_t;
+
 typedef void* (*CALLBACK)(void *);
 
-pthread_t *start_task_thread(int nthread, CALLBACK callback, void *param);
+thread_param_t *start_task_thread(int nthread, CALLBACK callback, void *param);
 void* dp_task_sender(void *param);
 void* sw_task_sender(void *param);
 void* task_recver(void *param);

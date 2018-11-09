@@ -16,7 +16,7 @@
 #include "fpga.h"
 
 #include "user_common.h"
-
+#include <gperftools/profiler.h>
 #ifdef HAVE_GETOPT
 #include <getopt.h>
 #else
@@ -106,7 +106,11 @@ static inline void yes_or_no(mm_mapopt_t *opt, int flag, int long_idx, const cha
 		else fprintf(stderr, "[WARNING]\033[1;31m option '--%s' only accepts 'yes' or 'no'.\033[0m\n", long_options[long_idx].name);
 	}
 }
-
+extern unsigned long long t[100];
+extern unsigned long long dp_consumer_t[100];
+extern unsigned long long sw_consumer_t[100];
+extern unsigned long long worker_for_t[100];
+extern unsigned long long step_1_t[100];
 int main(int argc, char *argv[])
 {
 	const char *opt_str = "2aSDw:W:k:K:t:r:f:Vv:g:G:I:d:XT:s:x:Hcp:M:n:z:A:B:O:E:m:N:Qu:R:hF:LC:y";
@@ -329,6 +333,12 @@ int main(int argc, char *argv[])
 #if FPGA_ON
 	int fpga = fpga_init(BLOCK);
 #endif
+    memset(&t, 0, sizeof(t));
+    memset(&dp_consumer_t, 0, sizeof(dp_consumer_t));
+    memset(&sw_consumer_t, 0, sizeof(sw_consumer_t));
+    memset(&worker_for_t, 0, sizeof(worker_for_t));
+    memset(&step_1_t, 0, sizeof(step_1_t));
+//ProfilerStart("test.prof");
 
 	snd_ctrl.stop = 0;
 	snd_ctrl.dp_ring_buf = ring_alloc(DP_QUEUE_NUM);
@@ -338,17 +348,19 @@ int main(int argc, char *argv[])
 	rcv_ctrl.sw_ring_buf = ring_alloc(SW_QUEUE_NUM);
 	x86_ctrl.stop = 0;
 	x86_ctrl.sw_ring_buf = ring_alloc(SW_QUEUE_NUM);
-	pthread_t *dpsnd = start_task_thread(sim_threads, task_sender, (void*)&snd_ctrl);
-    pthread_t *swsim = start_task_thread(n_threads, task_sender_sw, (void*)&x86_ctrl);
+	thread_param_t *dpsnd = start_task_thread(sim_threads, task_sender, (void*)&snd_ctrl);
+    thread_param_t *swsim = start_task_thread(n_threads, task_sender_sw, (void*)&x86_ctrl);
 #if FPGA_ON
-	pthread_t  *dprcv = start_task_thread(1, task_recver, (void*)&rcv_ctrl);
+	thread_param_t  *dprcv = start_task_thread(1, task_recver, (void*)&rcv_ctrl);
 #endif
 	init_dpctx();
 	init_data_lock();
 
 	init_swctx();
 	init_leftp();
-
+    
+    struct timespec t1, t2;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
 	while ((mi = mm_idx_reader_read(idx_rdr, n_threads)) != 0) {
 		if ((opt.flag & MM_F_CIGAR) && (mi->flag & MM_I_NO_SEQ)) {
 			fprintf(stderr, "[ERROR] the prebuilt index doesn't contain sequences.\n");
@@ -397,16 +409,78 @@ int main(int argc, char *argv[])
 	snd_ctrl.stop = 1;
 	rcv_ctrl.stop = 1;
 	x86_ctrl.stop = 1;
-	for (int k=0; k<sim_threads; k++) pthread_join(dpsnd[k], 0);
-	for (int k=0; k<n_threads; k++) pthread_join(swsim[k], 0);
+	for (int k=0; k<sim_threads; k++) pthread_join(dpsnd[k].tid, 0);
+	for (int k=0; k<n_threads; k++) pthread_join(swsim[k].tid, 0);
 #if FPGA_ON
     fpga_exit_block();
-    pthread_join(dprcv[0], 0);
+    pthread_join(dprcv[0].tid, 0);
     free(dprcv);
 #endif
     free(swsim);
     free(dpsnd);
-
+    
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+    unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+    //fprintf(stderr, "[time = %llu ms]\n", ta/1000000);
+    
+//ProfilerStop();
+    /*unsigned long long total_t = 0;
+    for (int k=0; k<sim_threads; k++) {
+        total_t += (t[k]/1000000);
+        fprintf(stderr, "t[%d]=%llu ms\n", k, t[k]/1000000);
+    }
+    fprintf(stderr, "total_t=%llu ms\n", total_t);*/
+    
+    /*unsigned long long total_step_1_t = 0;
+    for (int k=0; k<100; k++) {
+        if(step_1_t[k] > 0) {
+            total_step_1_t += (step_1_t[k]/1000000);
+            fprintf(stderr, "step_1_t[%d]=%llu ms\n", k, step_1_t[k]/1000000);
+        }
+    }
+    fprintf(stderr, "total_step_1_t=%llu ms\n", total_step_1_t);
+    
+    unsigned long long total_worker_for_t = 0;
+    for (int k=0; k<100; k++) {
+        if(worker_for_t[k] > 0) {
+            total_worker_for_t += (worker_for_t[k]/1000000);
+            fprintf(stderr, "worker_for_t[%d]=%llu ms\n", k, worker_for_t[k]/1000000);
+        }
+    }
+    fprintf(stderr, "total_worker_for_t=%llu ms\n", total_worker_for_t);
+    
+    unsigned long long total_dp_consumer_t = 0;
+    for (int k=0; k<100; k++) {
+        if(dp_consumer_t[k] > 0) {
+            total_dp_consumer_t += (dp_consumer_t[k]/1000000);
+            fprintf(stderr, "dp_consumer_t[%d]=%llu ms\n", k, dp_consumer_t[k]/1000000);
+        }
+    }
+    fprintf(stderr, "total_dp_consumer_t=%llu ms\n", total_dp_consumer_t);
+    
+    unsigned long long total_sw_consumer_t = 0;
+    for (int k=0; k<100; k++) {
+        if(sw_consumer_t[k] > 0) {
+            total_sw_consumer_t += (sw_consumer_t[k]/1000000);
+            fprintf(stderr, "sw_consumer_t[%d]=%llu ms\n", k, sw_consumer_t[k]/1000000);
+        }
+    }
+    fprintf(stderr, "total_sw_consumer_t=%llu ms\n", total_sw_consumer_t);
+    
+    
+    
+    fprintf(stderr, "snd_ctrl.dp_ring_buf->max_num=%d\n", snd_ctrl.dp_ring_buf->max_num);
+    fprintf(stderr, "rcv_ctrl.dp_ring_buf->max_num=%d\n", rcv_ctrl.dp_ring_buf->max_num);
+    fprintf(stderr, "snd_ctrl.sw_ring_buf->max_num=%d\n", snd_ctrl.sw_ring_buf->max_num);
+    fprintf(stderr, "x86_ctrl.sw_ring_buf->max_num=%d\n", x86_ctrl.sw_ring_buf->max_num);
+    fprintf(stderr, "rcv_ctrl.sw_ring_buf->max_num=%d\n", rcv_ctrl.sw_ring_buf->max_num);
+    */
+    /*print_ring_info(snd_ctrl.dp_ring_buf);
+	print_ring_info(rcv_ctrl.dp_ring_buf);
+	print_ring_info(snd_ctrl.sw_ring_buf);
+	print_ring_info(x86_ctrl.sw_ring_buf);
+	print_ring_info(rcv_ctrl.sw_ring_buf);*/
+    
 	//free at last, as maybe using...
 	ring_free(snd_ctrl.dp_ring_buf);
 	ring_free(rcv_ctrl.dp_ring_buf);

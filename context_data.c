@@ -303,7 +303,9 @@ int get_seed_pos(void *km, const mm_idx_t *mi, uint32_t na)
     int newblock = 0;
 
     if (seed_data && 
-      (DP_BATCHSIZE == seed_data->factnum)) {
+      //(DP_BATCHSIZE == seed_data->factnum)) {
+        (seed_data->factnum >= 1)) {
+        int tmp = seed_data->factnum;
 
         int idx = -1;
         do {
@@ -311,7 +313,7 @@ int get_seed_pos(void *km, const mm_idx_t *mi, uint32_t na)
         } while(idx < 0);
 
         newblock = 1;
-        add_req(DP_BATCHSIZE);
+        add_req(tmp);
         //fprintf(stderr, "put to ring, total %u, addr %p\n",add_req(0), seed_data);
     }
 

@@ -13,6 +13,10 @@ typedef struct {
   uint64_t ridx;
   uint64_t widx;
   uint64_t size;
+  uint32_t max_num;
+  uint32_t num;
+  uint64_t start_time;
+  uint32_t total_num;
   uint64_t buff[0];
 } vsc_ring_buf_t ;
 
@@ -110,6 +114,15 @@ static int put_to_ring_buf(vsc_ring_buf_t *ring, void *dataptr)
     idx = (ring->widx & (ring->size - 1));
     ring->buff[idx] = (uint64_t)dataptr;
     ring->widx += RING_BUF_CELL_SIZE;
+    ring->num++;
+    ring->total_num++;
+    if(ring->num > ring->max_num)
+        ring->max_num = ring->num;
+    if(ring->start_time == 0) {
+        struct timespec t;
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        ring->start_time = t.tv_sec * 1000000000 + t.tv_nsec;
+    }
   }
 
   pthread_spin_unlock(&ring->lock);
@@ -128,6 +141,7 @@ static int get_from_ring_buf(vsc_ring_buf_t *ring, void **dataptr)
     idx = (ring->ridx & (ring->size - 1));
     *dataptr = (void *)ring->buff[idx];
     ring->ridx += RING_BUF_CELL_SIZE;
+    ring->num--;
   }
 
   pthread_spin_unlock(&ring->lock);
@@ -143,6 +157,10 @@ static void init_ring_buf(vsc_ring_buf_t *ring, uint64_t blknum)
   ring->size = blknum;//<<3
   ring->widx = 0;
   ring->ridx = 0;
+  ring->max_num = 0;
+  ring->num = 0;
+  ring->total_num = 0;
+  ring->start_time = 0;
 
   pthread_spin_init(&ring->lock, PTHREAD_PROCESS_PRIVATE);
 }
@@ -158,6 +176,16 @@ static vsc_ring_buf_t * ring_alloc(uint64_t blknum)
 
   init_ring_buf(ring, blknum);
   return ring;
+}
+
+static void print_ring_info(vsc_ring_buf_t *ring)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    unsigned long long time = t.tv_sec*1000000000 + t.tv_nsec;
+    time = (time - ring->start_time)/1000000000;
+    
+    fprintf(stderr, "average queue depth=%d\n", ring->total_num/time);
 }
 
 static void ring_free(vsc_ring_buf_t *ring)

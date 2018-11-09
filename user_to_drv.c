@@ -40,18 +40,20 @@ static int idx_getseq(uint32_t n_seq, uint32_t slen, uint32_t rid, uint32_t st, 
 }
 
 
-pthread_t *start_task_thread(int nthread, CALLBACK callback, void *param)
+thread_param_t *start_task_thread(int nthread, CALLBACK callback, void *param)
 {
-    pthread_t *tid = (pthread_t *)malloc(nthread*sizeof(pthread_t));
+    thread_param_t *params = (thread_param_t *)malloc(nthread*sizeof(thread_param_t));
     for (int k=0; k<nthread; k++) 
     {
-        int err = pthread_create(&tid[k], 0, callback, param);
+        params[k].id = k;
+        params[k].ring_buf = (thread_ctrl_t*)param;
+        int err = pthread_create(&(params[k].tid), 0, callback, &params[k]);
         if (0 != err)
         {
             fprintf(stderr, "Failed to start thread, errno:%u, reason:[%s]\n",errno,strerror(errno));
         }
     }
-    return tid;
+    return params;
 } 
 
 
@@ -246,10 +248,11 @@ int dma_sw2_prepare(uint32_t magic, uint16_t tid, uint8_t lat, uint16_t num, uin
     return 0;
 }//end func
 
-
-void proc_dp(vsc_ring_buf_t *ring_buf)
+unsigned long long t[100];
+void proc_dp(vsc_ring_buf_t *ring_buf, int id)
 {
     dp_to_ring_t *snd_data = 0;
+    struct timespec t1, t2;
     int idx = get_from_ring_buf(ring_buf, (void **)&snd_data);
     if (idx >= 0)
     {
@@ -277,7 +280,11 @@ void proc_dp(vsc_ring_buf_t *ring_buf)
 #endif
 #ifdef RUN_ON_X86_DP
         //sim fpga proc
+        clock_gettime(CLOCK_MONOTONIC, &t1);
         calc_chaindp_batch(dest, snd_data->km, snd_data->mi);
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        unsigned long long ta = ((t2.tv_sec*1000000000 + t2.tv_nsec) - (t1.tv_sec*1000000000 + t1.tv_nsec));
+        t[id] += ta;
         kfree(snd_data->km, dest);
 #else
         fpga_writebuf_submit(dest, 2*memsize, CHAINDP);
@@ -297,11 +304,11 @@ void proc_dp(vsc_ring_buf_t *ring_buf)
 
 void* dp_task_sender(void *param)
 {
-    thread_ctrl_t *ctrl = (thread_ctrl_t*)param;
+    thread_ctrl_t *ctrl = ((thread_param_t*)param)->ring_buf;
     vsc_ring_buf_t *ring_buf = ctrl->dp_ring_buf;
 
     do {
-        proc_dp(ring_buf);
+        proc_dp(ring_buf, ((thread_param_t*)param)->id);
     } while(!ctrl->stop);
 
     return param;
@@ -319,9 +326,11 @@ void test_memalign(void)
     assert(32+DP_BATCHSIZE*32 == sizeof(sw_sndhdr_t));
 }
 
-void proc_sw(vsc_ring_buf_t *ring_buf)
+unsigned long long t_sw2[100];
+void proc_sw(vsc_ring_buf_t *ring_buf, int id)
 {
     sw_to_ring_t *snd_data = 0;
+    struct timespec t1, t2;
     int idx = get_from_ring_buf(ring_buf, (void **)&snd_data);
     if (idx >= 0)
     {
@@ -345,7 +354,12 @@ void proc_sw(vsc_ring_buf_t *ring_buf)
         set_swstat(snd_data->factnum, memsize);
         dma_sw_prepare(snd_data->magic, snd_data->tid, snd_data->lastblk, snd_data->factnum, memsize, dest, snd_data->data, snd_data->km);
         //sim fpga
+        clock_gettime(CLOCK_MONOTONIC, &t1);
         calc_sw(dest, snd_data->km, snd_data->opt);
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        unsigned long long ta = ((t2.tv_sec*1000000 + t2.tv_nsec/1000) - (t1.tv_sec*1000000 + t1.tv_nsec/1000));
+        t_sw2[id] += ta;
+        
 
         kfree(snd_data->km, dest);
 
@@ -369,7 +383,7 @@ void proc_sw2(vsc_ring_buf_t *ring_buf)
     int idx = get_from_ring_buf(ring_buf, (void **)&snd_data);
     if (idx >= 0)
     {
-        fprintf(stderr, "sw2 ring rcver    magic %d,factnum %d,size %d,tid %x,last %x,km %p\n",snd_data->magic,snd_data->factnum,snd_data->total_size,snd_data->tid,snd_data->lastblk,snd_data->km);
+        //fprintf(stderr, "sw2 ring rcver    magic %d,factnum %d,size %d,tid %x,last %x,km %p\n",snd_data->magic,snd_data->factnum,snd_data->total_size,snd_data->tid,snd_data->lastblk,snd_data->km);
         //prepare for long sw
         struct timespec tv;
         sw_to_ring_t *swring = sw_ring_init(snd_data->km,snd_data->opt,0,snd_data->tid,NT_LAST);
@@ -396,7 +410,7 @@ void proc_sw2(vsc_ring_buf_t *ring_buf)
                     *rdrd = *read;
                     swring->total_size += rdrd->reg.size;
                     snd_data->total_size -= rdrd->reg.size;
-                    fprintf(stderr, "^^^^^^^^^^^^^magic %d, factnum %d, mid %x,swpos %d,regpos %d\n", swring->magic,swring->factnum,rdrd->reg.midnum,rdrd->ctxpos,rdrd->reg.regpos);
+                    //fprintf(stderr, "^^^^^^^^^^^^^magic %d, factnum %d, mid %x,swpos %d,regpos %d\n", swring->magic,swring->factnum,rdrd->reg.midnum,rdrd->ctxpos,rdrd->reg.regpos);
                 }
 
             }
@@ -410,7 +424,7 @@ void proc_sw2(vsc_ring_buf_t *ring_buf)
             dest = (sw_sndhdr_t *)kmalloc(snd_data->km, memsize);
 #else
             dest = fpga_get_writebuf(memsize, BUF_TYPE_SW);
-            fprintf(stderr, "fpga_get_writebuf dest=%p\n", dest);
+            //fprintf(stderr, "fpga_get_writebuf dest=%p\n", dest);
 #endif
             set_swstat(snd_data->factnum, memsize);
             dma_sw2_prepare(snd_data->magic,snd_data->tid, snd_data->lastblk, snd_data->factnum, memsize, dest, snd_data->data, snd_data->km);
@@ -460,11 +474,11 @@ void proc_sw2(vsc_ring_buf_t *ring_buf)
 
 void* sw_task_sender(void *param)
 {
-    thread_ctrl_t *ctrl = (thread_ctrl_t*)param;
+    thread_ctrl_t *ctrl = ((thread_param_t*)param)->ring_buf;
     vsc_ring_buf_t *ring_buf = ctrl->sw_ring_buf;
 
     do {
-        proc_sw(ring_buf);
+        proc_sw(ring_buf, ((thread_param_t*)param)->id);
     } while(0);//(!ctrl->stop);
 
     return param;
@@ -473,29 +487,29 @@ void* sw_task_sender(void *param)
 
 void* task_sender(void *param)
 {
-    thread_ctrl_t *ctrl = (thread_ctrl_t*)param;
+    thread_ctrl_t *ctrl = ((thread_param_t*)param)->ring_buf;
     vsc_ring_buf_t *dpring_buf = ctrl->dp_ring_buf;
     vsc_ring_buf_t *swring_buf = ctrl->sw_ring_buf;
     do {
-        proc_dp(dpring_buf);
+        proc_dp(dpring_buf, ((thread_param_t*)param)->id);
 #ifndef DEBUG_API
         proc_sw2(swring_buf);
 #endif
     } while(!ctrl->stop);
-    fprintf(stderr, "task sender thread exit!\n");
+    //fprintf(stderr, "task sender thread exit!\n");
     return param;
 }
 
 void* task_sender_sw(void *param)
 {
-    thread_ctrl_t *ctrl = (thread_ctrl_t*)param;
+    thread_ctrl_t *ctrl = ((thread_param_t*)param)->ring_buf;
     vsc_ring_buf_t *swring_buf = ctrl->sw_ring_buf;
     do {
 #ifndef DEBUG_API
-        proc_sw(swring_buf);
+        proc_sw(swring_buf, ((thread_param_t*)param)->id);
 #endif
     } while(!ctrl->stop);
-    fprintf(stderr, "task sender sw thread exit!\n");
+    //fprintf(stderr, "task sender sw thread exit!\n");
     return param;
 }
 
@@ -547,13 +561,13 @@ void update_value(uint64_t *data)
   //debug
   static uint64_t totalsw = 0;
   totalsw += hdr->swcount;
-  fprintf(stderr, "***************total sw %llu\n", totalsw);
+  //fprintf(stderr, "***************total sw %llu\n", totalsw);
 }
 
 
 void* task_recver(void *param)
 {
-    thread_ctrl_t *ctrl = (thread_ctrl_t*)param;
+    thread_ctrl_t *ctrl = ((thread_param_t*)param)->ring_buf;
     vsc_ring_buf_t *dpring_buf = ctrl->dp_ring_buf;
     vsc_ring_buf_t *swring_buf = ctrl->sw_ring_buf;
     vsc_ring_buf_t *curr_ring = 0;
