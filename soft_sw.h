@@ -9,6 +9,21 @@
 #define CHAIN_RESULT_NUM     1024    //保存chain结果的数量
 
 typedef struct {
+    //align_regs context
+    mm_tbuf_t *b;
+    const mm_mapopt_t *opt;
+    int qlen;
+    const char* seq;
+    int n_regs0;
+    mm_reg1_t *regs0;
+    mm128_t *a;
+    long read_index;
+    
+    int rep_len;
+    int *n_regs;
+    mm_reg1_t **regs;
+    
+    
     
 }context_t;
 

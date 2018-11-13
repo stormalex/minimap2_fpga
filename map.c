@@ -246,10 +246,10 @@ static void chain_post(const mm_mapopt_t *opt, int max_chain_gap_ref, const mm_i
 	}
 }
 
-static mm_reg1_t *align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int qlen, const char *seq, int *n_regs, mm_reg1_t *regs, mm128_t *a, long read_index)
+static mm_reg1_t *align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int qlen, const char *seq, int *n_regs, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context)
 {
 	if (!(opt->flag & MM_F_CIGAR)) return regs;
-	regs = mm_align_skeleton(km, opt, mi, qlen, seq, n_regs, regs, a, read_index); // this calls mm_filter_regs()
+	regs = mm_align_skeleton(km, opt, mi, qlen, seq, n_regs, regs, a, read_index, context); // this calls mm_filter_regs()
 	if (!(opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
 		mm_set_parent(km, opt->mask_level, *n_regs, regs, opt->a * 2 + opt->b);
 		mm_select_sub(km, opt->pri_ratio, mi->k*2, opt->best_n, n_regs, regs);
@@ -268,7 +268,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	mm128_t *a;
 	mm128_v mv = {0,0,0};
 	mm_reg1_t *regs0;
-	km_stat_t kmst;
+	//km_stat_t kmst;
 
 	for (i = 0, qlen_sum = 0; i < n_segs; ++i)
 		qlen_sum += qlens[i], n_regs[i] = 0, regs[i] = 0;
@@ -338,12 +338,30 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	chain_post(opt, max_chain_gap_ref, mi, b->km, qlen_sum, n_segs, qlens, &n_regs0, regs0, a);
 	if (!is_sr) mm_est_err(mi, qlen_sum, n_regs0, regs0, a, n_mini_pos, mini_pos);
 
+    kfree(b->km, mv.a);
+	kfree(b->km, u);
+	kfree(b->km, mini_pos);
+
 	if (n_segs == 1) { // uni-segment
-		regs0 = align_regs(opt, mi, b->km, qlens[0], seqs[0], &n_regs0, regs0, a, read_index);
-		mm_set_mapq(b->km, n_regs0, regs0, opt->min_chain_score, opt->a, rep_len, is_sr);
-		n_regs[0] = n_regs0, regs[0] = regs0;
+        //保存上下文
+        context_t* context = (context_t*)malloc(sizeof(context_t));
+        context->b = b;
+        context->opt = opt;
+        context->qlen = qlens[0];
+        context->seq = seqs[0];
+        context->n_regs0 = n_regs0;
+        context->regs0 = regs0;
+        context->a = a;
+        context->read_index = read_index;
+        context->rep_len = rep_len;
+        context->n_regs = n_regs;
+        context->regs = regs;
+
+		regs0 = align_regs(opt, mi, b->km, qlens[0], seqs[0], &n_regs0, regs0, a, read_index, context);
+		//mm_set_mapq(b->km, n_regs0, regs0, opt->min_chain_score, opt->a, rep_len, is_sr);
+		//n_regs[0] = n_regs0, regs[0] = regs0;
 	} else { // multi-segment
-		mm_seg_t *seg;
+		/*mm_seg_t *seg;
 		seg = mm_seg_gen(b->km, hash, n_segs, qlens, n_regs0, regs0, n_regs, regs, a); // split fragment chain to separate segment chains
 		free(regs0);
 		for (i = 0; i < n_segs; ++i) {
@@ -354,14 +372,15 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 		mm_seg_free(b->km, n_segs, seg);
 		if (n_segs == 2 && opt->pe_ori >= 0 && (opt->flag&MM_F_CIGAR))
 			mm_pair(b->km, max_chain_gap_ref, opt->pe_bonus, opt->a * 2 + opt->b, opt->a, qlens, n_regs, regs); // pairing
-	}
+        */
+    }
 
-	kfree(b->km, mv.a);
-	kfree(b->km, a);
-	kfree(b->km, u);
-	kfree(b->km, mini_pos);
+	//kfree(b->km, mv.a);       //可以提前释放
+	//kfree(b->km, a);          //添加到上下文中，处理完结果后才能释放
+	//kfree(b->km, u);          //可以提前释放
+	//kfree(b->km, mini_pos);   //可以提前释放
 
-	if (b->km) {
+	/*if (b->km) {      //添加到上下文，处理完结果再处理
 		km_stat(b->km, &kmst);
 		if (mm_dbg_flag & MM_DBG_PRINT_QNAME)
 			fprintf(stderr, "QM\t%s\t%d\tcap=%ld,nCore=%ld,largest=%ld\n", qname, qlen_sum, kmst.capacity, kmst.n_cores, kmst.largest);
@@ -370,7 +389,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 			km_destroy(b->km);
 			b->km = km_init();
 		}
-	}
+	}*/
 }
 
 mm_reg1_t *mm_map(const mm_idx_t *mi, int qlen, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname)
@@ -422,7 +441,9 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	} else {
 		mm_map_frag(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name, i);
 	}
-	for (j = 0; j < s->n_seg[i]; ++j) // flip the query strand and coordinate to the original read strand
+
+    //这些代码目前不会进入
+	/*for (j = 0; j < s->n_seg[i]; ++j) // flip the query strand and coordinate to the original read strand
 		if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1)))) {
 			int k, t;
 			mm_revcomp_bseq(&s->seq[off + j]);
@@ -433,7 +454,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 				r->qe = qlens[j] - t;
 				r->rev = !r->rev;
 			}
-		}
+		}*/
 }
 
 static long read_num = 0;
@@ -481,10 +502,10 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
 
         if(read_num == 0) {
-            fprintf(stderr, "%d read ok!\n", read_num);
+            fprintf(stderr, "%ld read ok!\n", read_num);
         }
         else {
-            fprintf(stderr, "%d read do not process!\n", read_num);
+            fprintf(stderr, "%ld read do not process!\n", read_num);
         }
 		return in;
     } else if (step == 2) { // step 2: output
