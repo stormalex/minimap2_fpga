@@ -58,59 +58,54 @@ context_t* delete_context(int i)
 //保存任务的数组
 chain_sw_task_t* chain_tasks_array[CHAIN_TASK_NUM];
 pthread_mutex_t tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int tasks_insert_index = 0;
-static int tasks_delete_index = 0;
+static int tasks_head = 0;
+static int tasks_tail = 0;
 
 void init_task_array()
 {
     memset(chain_tasks_array, 0, sizeof(chain_tasks_array));
-    tasks_insert_index = 0;
-    tasks_delete_index = 0;
+    tasks_head = 0;
+    tasks_tail = 0;
     return;
 }
 
-void send_task(chain_sw_task_t* chain_sw_tasks)
+int task_is_full()
+{
+    return ((tasks_tail + 1) % CHAIN_TASK_NUM == tasks_head);
+}
+int task_is_empty()
+{
+    return (tasks_head == tasks_tail);
+}
+
+int send_task(chain_sw_task_t* chain_sw_tasks)
 {
     pthread_mutex_lock(&tasks_mutex);
-    if((tasks_insert_index+1)%CHAIN_TASK_NUM == tasks_delete_index) {
-        fprintf(stderr, "have no position to save task\n");
+    if (task_is_full()) {
         pthread_mutex_unlock(&tasks_mutex);
-        return;
+        fprintf(stderr, "task ringbuf is full\n");
+        return -1;
     }
-    tasks_insert_index++;
-    tasks_insert_index = tasks_insert_index%CHAIN_TASK_NUM;
-    if(chain_tasks_array[tasks_insert_index] != NULL) {
-        fprintf(stderr, "NULL, index:%d, delete=%d\n", tasks_insert_index, tasks_delete_index);
-        pthread_mutex_unlock(&tasks_mutex);
-        return;
-    }
-    chain_tasks_array[tasks_insert_index] = chain_sw_tasks;
-    fprintf(stderr, "insert to %d\n", tasks_insert_index);
+    
+    chain_tasks_array[tasks_tail] = chain_sw_tasks;
+    fprintf(stderr, "task insert to %d\n", tasks_tail);
+    tasks_tail = (tasks_tail + 1) % CHAIN_TASK_NUM;
+        
     pthread_mutex_unlock(&tasks_mutex);
-    return;
+    return 0;
 }
 
 chain_sw_task_t* get_task()
 {
     chain_sw_task_t* tmp;
     pthread_mutex_lock(&tasks_mutex);
-    if(tasks_delete_index == tasks_insert_index) {
-        fprintf(stderr, "have no task\n");
+    if (task_is_empty()) {
         pthread_mutex_unlock(&tasks_mutex);
+        fprintf(stderr, "task ringbuf is empty\n");
         return NULL;
     }
-    
-    tmp = chain_tasks_array[tasks_delete_index];
-    if(tmp == NULL) {
-        fprintf(stderr, "NULL, index:%d, delete=%d\n", tasks_insert_index, tasks_delete_index);
-        pthread_mutex_unlock(&tasks_mutex);
-        return NULL;
-    }
-    fprintf(stderr, "get from %d\n", tasks_delete_index);
-    chain_tasks_array[tasks_delete_index] = NULL;
-    tasks_delete_index++;
-    tasks_delete_index = tasks_delete_index%CHAIN_TASK_NUM;
-    
+    tmp = chain_tasks_array[tasks_head];
+    tasks_head = (tasks_head + 1) % CHAIN_TASK_NUM;
     pthread_mutex_unlock(&tasks_mutex);
     
     return tmp;
@@ -120,58 +115,54 @@ chain_sw_task_t* get_task()
 //保存结果的数组
 sw_result_t* results_array[CHAIN_RESULT_NUM];
 pthread_mutex_t results_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int results_insert_index = 0;
-static int results_delete_index = 0;
+static int results_head = 0;
+static int results_tail = 0;
 
 void init_result_array()
 {
     memset(results_array, 0, sizeof(results_array));
-    results_insert_index = 0;
-    results_delete_index = 0;
+    results_head = 0;
+    results_tail = 0;
     return;
 }
 
-void send_result(sw_result_t* results)
+int result_is_full()
+{
+    return ((results_tail + 1) % CHAIN_RESULT_NUM == results_head);
+}
+int result_is_empty()
+{
+    return (results_head == results_tail);
+}
+
+int send_result(sw_result_t* results)
 {
     pthread_mutex_lock(&results_mutex);
-    if((results_insert_index+1)%CHAIN_RESULT_NUM == results_delete_index) {
-        fprintf(stderr, "have no position to save result\n");
+    if (result_is_full()) {
         pthread_mutex_unlock(&results_mutex);
-        return;
+        fprintf(stderr, "result ringbuf is full\n");
+        return -1;
     }
-    results_insert_index++;
-    results_insert_index = results_insert_index%CHAIN_RESULT_NUM;
-    if(results_array[results_insert_index] != NULL) {
-        fprintf(stderr, "NULL, index:%d, delete=%d\n", results_insert_index, results_delete_index);
-        pthread_mutex_unlock(&results_mutex);
-        return;
-    }
-    results_array[results_insert_index] = results;
-    fprintf(stderr, "insert to %d\n", results_insert_index);
+    
+    results_array[results_tail] = results;
+    fprintf(stderr, "result insert to %d\n", results_tail);
+    results_tail = (results_tail + 1) % CHAIN_RESULT_NUM;
+        
     pthread_mutex_unlock(&results_mutex);
-    return;
+    return 0;
 }
 
 sw_result_t* get_result()
 {
     sw_result_t* tmp;
     pthread_mutex_lock(&results_mutex);
-    if(results_delete_index == results_insert_index) {
-        fprintf(stderr, "have no result\n");
+    if (result_is_empty()) {
         pthread_mutex_unlock(&results_mutex);
+        fprintf(stderr, "result ringbuf is empty\n");
         return NULL;
     }
-    
-    tmp = results_array[results_delete_index];
-    if(tmp == NULL) {
-        fprintf(stderr, "NULL, index:%d, delete=%d\n", results_insert_index, results_delete_index);
-        pthread_mutex_unlock(&results_mutex);
-        return NULL;
-    }
-    results_array[results_delete_index] = NULL;
-    fprintf(stderr, "get from %d\n", results_delete_index);
-    results_delete_index++;
-    results_delete_index = results_delete_index%CHAIN_RESULT_NUM;
+    tmp = results_array[results_head];
+    results_head = (results_head + 1) % CHAIN_RESULT_NUM;
     
     pthread_mutex_unlock(&results_mutex);
     return tmp;
@@ -195,13 +186,13 @@ sw_task_t* create_sw_task(int qlen,
     sw_task_t* new_task = (sw_task_t*)malloc(sizeof(sw_task_t));
     if(new_task != NULL) {
         new_task->qlen = qlen;
-        new_task->query = (uint8_t *)malloc(qlen + 1);
-        new_task->qlen = tlen;
-        new_task->target = (uint8_t *)malloc(qlen + 1);
-        memcpy(new_task->query, query, qlen * sizeof(uint8_t));
-        memcpy(new_task->target, target, tlen * sizeof(uint8_t));
-        new_task->query[qlen] = '\0';
-        new_task->target[tlen] = '\0';
+        new_task->query = (uint8_t *)malloc(qlen*sizeof(uint8_t));
+        new_task->tlen = tlen;
+        new_task->target = (uint8_t *)malloc(tlen*sizeof(uint8_t));
+        memcpy(new_task->query, query, qlen*sizeof(uint8_t));
+        memcpy(new_task->target, target, tlen*sizeof(uint8_t));
+        //new_task->query[qlen] = '\0';
+        //new_task->target[tlen] = '\0';
         memcpy(new_task->mat, mat, sizeof(new_task->mat));
         new_task->q = q;
         new_task->e = e;
@@ -234,8 +225,8 @@ chain_sw_task_t* create_chain_sw_task(context_t* context)
     if(new_chain_sw_task != NULL) {
         new_chain_sw_task->context = context;
         new_chain_sw_task->sw_num = 0;
-        new_chain_sw_task->sw_size = 0;
-        new_chain_sw_task->sw_tasks = NULL;
+        new_chain_sw_task->sw_size = 32;
+        new_chain_sw_task->sw_tasks = (sw_task_t**)malloc(new_chain_sw_task->sw_size * sizeof(sw_task_t*));
     }
     return new_chain_sw_task;
 }
@@ -258,12 +249,13 @@ void add_sw_task(chain_sw_task_t* chain_sw_task, sw_task_t* sw_task)
     if(chain_sw_task != NULL && sw_task != NULL) {
         if(chain_sw_task->sw_size == 0)
             chain_sw_task->sw_size = 32;
-        else if(chain_sw_task->sw_size == chain_sw_task->sw_num)
+        else if(chain_sw_task->sw_size == chain_sw_task->sw_num) {
             chain_sw_task->sw_size = chain_sw_task->sw_size*2;
-        fprintf(stderr, "chain_sw_task->sw_size=%d\n", chain_sw_task->sw_size);
-        chain_sw_task->sw_tasks = (sw_task_t**)realloc(chain_sw_task->sw_tasks, chain_sw_task->sw_size * sizeof(sw_task_t*));
-        chain_sw_task->sw_num++;
+            //fprintf(stderr, "chain_sw_task(%p)->sw_size=%d\n", chain_sw_task, chain_sw_task->sw_size);
+            chain_sw_task->sw_tasks = (sw_task_t**)realloc(chain_sw_task->sw_tasks, chain_sw_task->sw_size * sizeof(sw_task_t*));
+        }
         chain_sw_task->sw_tasks[chain_sw_task->sw_num] = sw_task;
+        chain_sw_task->sw_num++;
     }
     return;
 }
@@ -285,12 +277,13 @@ void add_result(sw_result_t* result, ksw_extz_t* ez)
     if(result != NULL && ez != NULL) {
         if(result->result_size == 0)
             result->result_size = 32;
-        else if(result->result_size == result->result_num)
+        else if(result->result_size == result->result_num) {
             result->result_size = result->result_size*2;
-        fprintf(stderr, "result->result_size=%d\n", result->result_size);
-        result->ezs = (ksw_extz_t**)realloc(result->ezs, result->result_size * sizeof(ksw_extz_t*));
-        result->result_num++;
+            fprintf(stderr, "result->result_size=%d\n", result->result_size);
+            result->ezs = (ksw_extz_t**)realloc(result->ezs, result->result_size * sizeof(ksw_extz_t*));
+        }
         result->ezs[result->result_num] = ez;
+        result->result_num++;
     }
     return;
 }

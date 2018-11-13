@@ -246,16 +246,16 @@ static void chain_post(const mm_mapopt_t *opt, int max_chain_gap_ref, const mm_i
 	}
 }
 
-static mm_reg1_t *align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int qlen, const char *seq, int *n_regs, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context)
+static void align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int qlen, const char *seq, int *n_regs, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context)
 {
-	if (!(opt->flag & MM_F_CIGAR)) return regs;
-	regs = mm_align_skeleton(km, opt, mi, qlen, seq, n_regs, regs, a, read_index, context); // this calls mm_filter_regs()
-	if (!(opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
+	if (!(opt->flag & MM_F_CIGAR)) return;
+	mm_align_skeleton(km, opt, mi, qlen, seq, n_regs, regs, a, read_index, context); // this calls mm_filter_regs()
+	/*if (!(opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
 		mm_set_parent(km, opt->mask_level, *n_regs, regs, opt->a * 2 + opt->b);
 		mm_select_sub(km, opt->pri_ratio, mi->k*2, opt->best_n, n_regs, regs);
 		mm_set_sam_pri(*n_regs, regs);
-	}
-	return regs;
+	}*/
+	return;
 }
 
 void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long read_index)
@@ -357,7 +357,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
         context->n_regs = n_regs;
         context->regs = regs;
 
-		regs0 = align_regs(opt, mi, b->km, qlens[0], seqs[0], &n_regs0, regs0, a, read_index, context);
+		align_regs(opt, mi, b->km, qlens[0], seqs[0], &n_regs0, regs0, a, read_index, context);
 		//mm_set_mapq(b->km, n_regs0, regs0, opt->min_chain_score, opt->a, rep_len, is_sr);
 		//n_regs[0] = n_regs0, regs[0] = regs0;
 	} else { // multi-segment
@@ -507,6 +507,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
         else {
             fprintf(stderr, "%ld read do not process!\n", read_num);
         }
+        while(read_num);
 		return in;
     } else if (step == 2) { // step 2: output
 		void *km = 0;

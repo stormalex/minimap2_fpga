@@ -94,10 +94,10 @@ int ksw_ll_i16(void *q, int tlen, const uint8_t *target, int gapo, int gape, int
 #include "kalloc.h"
 #else
 #include <stdlib.h>
-#define kmalloc(km, size) malloc((size))
-#define kcalloc(km, count, size) calloc((count), (size))
-#define krealloc(km, ptr, size) realloc((ptr), (size))
-#define kfree(km, ptr) free((ptr))
+#define kmalloc(km, size) malloc(size)
+#define kcalloc(km, count, size) calloc(count, size)
+#define krealloc(km, ptr, size) realloc(ptr, size)
+#define kfree(km, ptr) free(ptr)
 #endif
 
 static inline uint32_t *ksw_push_cigar(void *km, int *n_cigar, int *m_cigar, uint32_t *cigar, uint32_t op, int len)

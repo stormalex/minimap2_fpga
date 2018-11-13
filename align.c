@@ -422,7 +422,7 @@ static void mm_fix_bad_ends_splice(void *km, const mm_mapopt_t *opt, const mm_id
 	}
 }
 
-static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], mm_reg1_t *r, mm_reg1_t *r2, int n_a, mm128_t *a, ksw_extz_t *ez, int splice_flag, long read_index)
+static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], mm_reg1_t *r, mm_reg1_t *r2, int n_a, mm128_t *a, ksw_extz_t *ez, int splice_flag, long read_index, context_t* context)
 {
 	int is_sr = !!(opt->flag & MM_F_SR), is_splice = !!(opt->flag & MM_F_SPLICE);
 	int32_t rid = a[r->as].x<<1>>33, rev = a[r->as].x>>63, as1, cnt1;
@@ -542,24 +542,33 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	assert(re0 > rs0);
 	tseq = (uint8_t*)kmalloc(km, re0 - rs0);
 
+    //创建一个chain的sw任务
+    chain_sw_task_t* chain_task = create_chain_sw_task(context);
+    sw_task_t* sw_task = NULL;
 	if (qs > 0 && rs > 0) { // left extension
 		qseq = &qseq0[rev][qs0];
 		mm_idx_getseq(mi, rid, rs0, rs, tseq);
 		mm_seq_rev(qs - qs0, qseq);
 		mm_seq_rev(rs - rs0, tseq);
 
-        fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", qs - qs0, rs - rs0, bw);
+        //fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", qs - qs0, rs - rs0, bw);
+        sw_task = create_sw_task(qs - qs0, qseq, rs - rs0, tseq,
+                        mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
+                        r->split_inv? opt->zdrop_inv : opt->zdrop,
+                        opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
+                        0);
+        add_sw_task(chain_task, sw_task);
 		/*mm_align_pair(km, opt, qs - qs0, qseq, rs - rs0, tseq, mat, bw, opt->end_bonus, r->split_inv? opt->zdrop_inv : opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, ez);
         if (ez->n_cigar > 0) {
 			mm_append_cigar(r, ez->n_cigar, ez->cigar);
 			r->p->dp_score += ez->max;
-		}*/
+		}
 		rs1 = rs - (ez->reach_end? ez->mqe_t + 1 : ez->max_t + 1);
-		qs1 = qs - (ez->reach_end? qs - qs0 : ez->max_q + 1);
+		qs1 = qs - (ez->reach_end? qs - qs0 : ez->max_q + 1);*/
 		mm_seq_rev(qs - qs0, qseq);
 	} else rs1 = rs, qs1 = qs;
 	re1 = rs, qe1 = qs;
-	assert(qs1 >= 0 && rs1 >= 0);
+	//assert(qs1 >= 0 && rs1 >= 0);
 
 	for (i = is_sr? cnt1 - 1 : 1; i < cnt1; ++i) { // gap filling
 		if ((a[as1+i].y & (MM_SEED_IGNORE|MM_SEED_TANDEM)) && i != cnt1 - 1) continue;
@@ -584,8 +593,15 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 				}
 				ez->cigar = ksw_push_cigar(km, &ez->n_cigar, &ez->m_cigar, ez->cigar, 0, qe - qs);
 			} else { // perform normal gapped alignment
-                fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", qe - qs, re - rs, bw1);
-				//mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
+                //fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", qe - qs, re - rs, bw1);
+				sw_task = create_sw_task(qe - qs, qseq, re - rs, tseq,
+                        mat, opt->q, opt->e, opt->q2, opt->e2, bw1, 
+                        opt->zdrop,
+                        -1, extra_flag|KSW_EZ_APPROX_MAX, 
+                        1);
+                add_sw_task(chain_task, sw_task);
+                
+                //mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
             }
 			// test Z-drop and inversion Z-drop
 			//if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0)
@@ -618,7 +634,13 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	if (!dropped && qe < qe0 && re < re0) { // right extension
 		qseq = &qseq0[rev][qe];
 		mm_idx_getseq(mi, rid, re, re0, tseq);
-        fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", qe0 - qe, re0 - re, bw);
+        //fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", qe0 - qe, re0 - re, bw);
+        sw_task = create_sw_task(qe0 - qe, qseq, re0 - re, tseq,
+                        mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
+                        opt->zdrop,
+                        opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY, 
+                        2);
+        add_sw_task(chain_task, sw_task);
 		/*mm_align_pair(km, opt, qe0 - qe, qseq, re0 - re, tseq, mat, bw, opt->end_bonus, opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY, ez);
 		if (ez->n_cigar > 0) {
 			mm_append_cigar(r, ez->n_cigar, ez->cigar);
@@ -627,7 +649,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		re1 = re + (ez->reach_end? ez->mqe_t + 1 : ez->max_t + 1);
 		qe1 = qe + (ez->reach_end? qe0 - qe : ez->max_q + 1);*/
 	}
-	assert(qe1 <= qlen);
+	//assert(qe1 <= qlen);
 
 	/*r->rs = rs1, r->re = re1;
 	if (rev) r->qs = qlen - qe1, r->qe = qlen - qs1;
@@ -640,7 +662,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		if (rev && r->p->trans_strand)
 			r->p->trans_strand ^= 3; // flip to the read strand
 	}*/
-
+    while(send_task(chain_task));  //将任务放到任务队列
 	kfree(km, tseq);
 }
 
@@ -711,12 +733,12 @@ static inline mm_reg1_t *mm_insert_reg(const mm_reg1_t *r, int i, int *n_regs, m
 	return regs;
 }
 
-mm_reg1_t *mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, const char *qstr, int *n_regs_, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context)
+void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, const char *qstr, int *n_regs_, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context)
 {
 	extern unsigned char seq_nt4_table[256];
 	int32_t i, n_regs = *n_regs_, n_a;
 	uint8_t *qseq0[2];
-	ksw_extz_t ez;
+	//ksw_extz_t ez;
 
 	// encode the query sequence
 	qseq0[0] = (uint8_t*)kmalloc(km, qlen * 2);
@@ -728,16 +750,16 @@ mm_reg1_t *mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *m
 
 	// align through seed hits
 	n_a = mm_squeeze_a(km, n_regs, regs, a);
-	memset(&ez, 0, sizeof(ksw_extz_t));
+	//memset(&ez, 0, sizeof(ksw_extz_t));
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;
         fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", n_regs, i, read_index);
 		if ((opt->flag&MM_F_SPLICE) && (opt->flag&MM_F_SPLICE_FOR) && (opt->flag&MM_F_SPLICE_REV)) { // then do two rounds of alignments for both strands
-			mm_reg1_t s[2], s2[2];
+			/*mm_reg1_t s[2], s2[2];
 			int which, trans_strand;
 			s[0] = s[1] = regs[i];
-			mm_align1(km, opt, mi, qlen, qseq0, &s[0], &s2[0], n_a, a, &ez, MM_F_SPLICE_FOR, read_index);
-			mm_align1(km, opt, mi, qlen, qseq0, &s[1], &s2[1], n_a, a, &ez, MM_F_SPLICE_REV, read_index);
+			mm_align1(km, opt, mi, qlen, qseq0, &s[0], &s2[0], n_a, a, NULL, MM_F_SPLICE_FOR, read_index);
+			mm_align1(km, opt, mi, qlen, qseq0, &s[1], &s2[1], n_a, a, NULL, MM_F_SPLICE_REV, read_index);
 			if (s[0].p->dp_score > s[1].p->dp_score) which = 0, trans_strand = 1;
 			else if (s[0].p->dp_score < s[1].p->dp_score) which = 1, trans_strand = 2;
 			else trans_strand = 3, which = (qlen + s[0].p->dp_score) & 1; // randomly choose a strand, effectively
@@ -748,24 +770,24 @@ mm_reg1_t *mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *m
 				regs[i] = s[1], r2 = s2[1];
 				free(s[0].p);
 			}
-			regs[i].p->trans_strand = trans_strand;
+			regs[i].p->trans_strand = trans_strand;*/
 		} else { // one round of alignment
-			mm_align1(km, opt, mi, qlen, qseq0, &regs[i], &r2, n_a, a, &ez, opt->flag, read_index);
+			mm_align1(km, opt, mi, qlen, qseq0, &regs[i], &r2, n_a, a, NULL, opt->flag, read_index, context);
 			if (opt->flag&MM_F_SPLICE)
 				regs[i].p->trans_strand = opt->flag&MM_F_SPLICE_FOR? 1 : 2;
 		}
-		if (r2.cnt > 0) regs = mm_insert_reg(&r2, i, &n_regs, regs);
+		/*if (r2.cnt > 0) regs = mm_insert_reg(&r2, i, &n_regs, regs);
 		if (i > 0 && regs[i].split_inv) {
 			if (mm_align1_inv(km, opt, mi, qlen, qseq0, &regs[i-1], &regs[i], &r2, &ez)) {
 				regs = mm_insert_reg(&r2, i, &n_regs, regs);
 				++i; // skip the inserted INV alignment
 			}
-		}
+		}*/
 	}
 	//*n_regs_ = n_regs;
 	//kfree(km, qseq0[0]);
 	//kfree(km, ez.cigar);
 	//mm_filter_regs(km, opt, qlen, n_regs_, regs);
 	//mm_hit_sort_by_dp(km, n_regs_, regs);
-	return regs;
+	return;
 }

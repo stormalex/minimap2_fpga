@@ -22,9 +22,6 @@ typedef struct {
     int rep_len;
     int *n_regs;
     mm_reg1_t **regs;
-    
-    
-    
 }context_t;
 
 
@@ -61,7 +58,7 @@ typedef struct {
 }sw_result_t;
 
 
-void send_task(chain_sw_task_t* chain_sw_tasks);
+int send_task(chain_sw_task_t* chain_sw_tasks);
 sw_result_t* get_result();
 
 //创建一个sw任务
