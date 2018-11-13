@@ -436,6 +436,9 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 		}
 }
 
+static long read_num = 0;
+static char* read_flag = NULL;
+
 static void *worker_pipeline(void *shared, int step, void *in)
 {
 	int i, j, k;
@@ -468,7 +471,21 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
+        read_num = ((step_t*)in)->n_frag;
+        read_flag = (char*)malloc(read_num);
+        memset(read_flag, 0xff, read_num);
+
+        //TODO 处理结果的线程
+
+
 		kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
+
+        if(read_num == 0) {
+            fprintf(stderr, "%d read ok!\n", read_num);
+        }
+        else {
+            fprintf(stderr, "%d read do not process!\n", read_num);
+        }
 		return in;
     } else if (step == 2) { // step 2: output
 		void *km = 0;

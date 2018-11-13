@@ -330,6 +330,8 @@ void sw_thread(void* arg)
             result->pos_flag[i] = task->position;
             add_result(result, ez);
         }
+        result->context = chain_tasks->context;
+        destroy_chain_sw_task(chain_tasks);
         send_result(result);
     }
 }

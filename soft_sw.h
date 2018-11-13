@@ -38,11 +38,16 @@ typedef struct {
 }chain_sw_task_t;
 
 typedef struct {
+    context_t* context;
     int result_num;
     int result_size;
     char pos_flag[1024];
     ksw_extz_t** ezs;
 }sw_result_t;
+
+
+void send_task(chain_sw_task_t* chain_sw_tasks);
+sw_result_t* get_result();
 
 //创建一个sw任务
 sw_task_t* create_sw_task(int qlen,
@@ -73,4 +78,15 @@ void add_sw_task(chain_sw_task_t* chain_sw_task, sw_task_t* sw_task);
 //销毁一个chain的sw任务对象，包括它里面存储的所有sw的任务
 void destroy_chain_sw_task(chain_sw_task_t* chain_sw_task);
 
+//创建一个chain的结果
+sw_result_t* create_result();
+
+//向result中加入一个ez结果
+void add_result(sw_result_t* result, ksw_extz_t* ez);
+
+//销毁一个chain的所有result
+void destroy_results(sw_result_t* result);
+
+//sw处理的线程
+void sw_thread(void* arg);
 #endif //__SOFT_SW_H__
