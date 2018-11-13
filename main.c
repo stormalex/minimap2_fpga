@@ -10,6 +10,9 @@
 #include "getopt.h"
 #endif
 
+#include <pthread.h>
+#include "soft_sw.h"
+
 #define MM_VERSION "2.10-r761"
 
 #ifdef __linux__
@@ -309,7 +312,11 @@ int main(int argc, char *argv[])
 	}
 	if (opt.best_n == 0 && (opt.flag&MM_F_CIGAR) && mm_verbose >= 2)
 		fprintf(stderr, "[WARNING]\033[1;31m `-N 0' reduces alignment accuracy. Please use --secondary=no to suppress secondary alignments.\033[0m\n");
-	while ((mi = mm_idx_reader_read(idx_rdr, n_threads)) != 0) {
+
+    pthread_t sw_tid;
+    pthread_create(&sw_tid, NULL, sw_thread, NULL);
+
+    while ((mi = mm_idx_reader_read(idx_rdr, n_threads)) != 0) {
 		if ((opt.flag & MM_F_CIGAR) && (mi->flag & MM_I_NO_SEQ)) {
 			fprintf(stderr, "[ERROR] the prebuilt index doesn't contain sequences.\n");
 			mm_idx_destroy(mi);
@@ -344,6 +351,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "[ERROR] failed to write the results\n");
 		exit(EXIT_FAILURE);
 	}
+
+    stop_sw_thread();
+    pthread_join(sw_tid, NULL);
 
 	if (mm_verbose >= 3) {
 		fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);

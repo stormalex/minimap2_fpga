@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include "minimap.h"
 #include "mmpriv.h"
@@ -16,7 +17,7 @@
 
 #include "soft_sw.h"
 
-int sw_stop_flag = 1;
+static int sw_stop_flag = 1;
 
 //保存上下文的数组
 context_t* context_array[CONTEXT_NUM];
@@ -84,6 +85,7 @@ int send_task(chain_sw_task_t* chain_sw_tasks)
     if (task_is_full()) {
         pthread_mutex_unlock(&tasks_mutex);
         fprintf(stderr, "task ringbuf is full\n");
+        sleep(1);
         return -1;
     }
     
@@ -92,6 +94,7 @@ int send_task(chain_sw_task_t* chain_sw_tasks)
     tasks_tail = (tasks_tail + 1) % CHAIN_TASK_NUM;
         
     pthread_mutex_unlock(&tasks_mutex);
+    sleep(1);
     return 0;
 }
 
@@ -102,12 +105,14 @@ chain_sw_task_t* get_task()
     if (task_is_empty()) {
         pthread_mutex_unlock(&tasks_mutex);
         fprintf(stderr, "task ringbuf is empty\n");
+        sleep(1);
         return NULL;
     }
     tmp = chain_tasks_array[tasks_head];
+    fprintf(stderr, "task take from %d\n", tasks_head);
     tasks_head = (tasks_head + 1) % CHAIN_TASK_NUM;
     pthread_mutex_unlock(&tasks_mutex);
-    
+    sleep(1);
     return tmp;
 }
 
@@ -302,7 +307,12 @@ void destroy_results(sw_result_t* result)
     return;
 }
 
-void sw_thread(void* arg)
+void stop_sw_thread()
+{
+    sw_stop_flag = 0;
+}
+
+void* sw_thread(void* arg)
 {
     int i = 0;
     init_task_array();
@@ -314,17 +324,25 @@ void sw_thread(void* arg)
         if(chain_tasks == NULL)
             continue;
         sw_result_t* result = create_result();
+        //fprintf(stderr, "sw task num=%d\n", chain_tasks->sw_num);
         for(i = 0; i < chain_tasks->sw_num; i++) {
             ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
-            
+            memset(ez, 0, sizeof(ksw_extz_t));
             sw_task_t* task = chain_tasks->sw_tasks[i];
             
             ksw_extd2_sse(NULL, task->qlen, task->query, task->tlen, task->target, 5, task->mat, task->q, task->e, task->q2, task->e2, task->w, task->zdrop, task->end_bonus, task->flag, ez);
             result->pos_flag[i] = task->position;
+
+            //for debug
+            result->qlen[i] = task->qlen;
+            result->tlen[i] = task->tlen;
+            result->w[i] = task->w;
+
             add_result(result, ez);
         }
         result->context = chain_tasks->context;
         destroy_chain_sw_task(chain_tasks);
         send_result(result);
     }
+    return NULL;
 }

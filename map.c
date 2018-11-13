@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <pthread.h>
 #include "kthread.h"
 #include "kvec.h"
 #include "kalloc.h"
@@ -8,6 +9,8 @@
 #include "mmpriv.h"
 #include "bseq.h"
 #include "khash.h"
+
+void* sw_result_thread(void* arg);
 
 struct mm_tbuf_s {
 	void *km;
@@ -497,7 +500,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
         memset(read_flag, 0xff, read_num);
 
         //TODO 处理结果的线程
-
+        pthread_t sw_tid;
+        pthread_create(&sw_tid, NULL, sw_result_thread, &read_num);
 
 		kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
 
@@ -507,6 +511,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
         else {
             fprintf(stderr, "%ld read do not process!\n", read_num);
         }
+        pthread_join(sw_tid, NULL);
         while(read_num);
 		return in;
     } else if (step == 2) { // step 2: output
@@ -586,4 +591,30 @@ int mm_map_file_frag(const mm_idx_t *idx, int n_segs, const char **fn, const mm_
 int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int n_threads)
 {
 	return mm_map_file_frag(idx, 1, &fn, opt, n_threads);
+}
+
+void* sw_result_thread(void* arg)
+{
+    long read_num = *((long*)arg);
+    int i = 0;
+    while(1) {
+        sw_result_t* result = get_result();
+        context_t* context = result->context;
+
+        for(i = 0; i < result->result_num; i++) {
+            if(result->pos_flag[i] == 0) {  //left
+                fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", result->qlen[i], result->tlen[i], result->w[i]);
+
+            }
+            else if(result->pos_flag[i] == 1) {     //gap
+                fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", result->qlen[i], result->tlen[i], result->w[i]);
+            }
+            else if(result->pos_flag[i] == 2) {     //right
+                fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", result->qlen[i], result->tlen[i], result->w[i]);
+            }
+            else {
+                fprintf(stderr, "error position flag(%d), read_index:%ld\n", (int)(result->pos_flag[i]), context->read_index);
+            }
+        }
+    }
 }

@@ -753,7 +753,7 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
 	//memset(&ez, 0, sizeof(ksw_extz_t));
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;
-        fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", n_regs, i, read_index);
+        //fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", n_regs, i, read_index);
 		if ((opt->flag&MM_F_SPLICE) && (opt->flag&MM_F_SPLICE_FOR) && (opt->flag&MM_F_SPLICE_REV)) { // then do two rounds of alignments for both strands
 			/*mm_reg1_t s[2], s2[2];
 			int which, trans_strand;

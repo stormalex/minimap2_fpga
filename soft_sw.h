@@ -55,6 +55,13 @@ typedef struct {
     int result_size;
     char pos_flag[1024];
     ksw_extz_t** ezs;
+
+    //for debug
+    int qlen[1024];
+    int tlen[1024];
+    int w[1024];
+
+
 }sw_result_t;
 
 
@@ -100,5 +107,8 @@ void add_result(sw_result_t* result, ksw_extz_t* ez);
 void destroy_results(sw_result_t* result);
 
 //sw处理的线程
-void sw_thread(void* arg);
+void* sw_thread(void* arg);
+
+//停止sw处理线程
+void stop_sw_thread();
 #endif //__SOFT_SW_H__
