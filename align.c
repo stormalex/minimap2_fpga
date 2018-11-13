@@ -547,11 +547,11 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		mm_seq_rev(rs - rs0, tseq);
 
         fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", qs - qs0, rs - rs0, bw);
-		mm_align_pair(km, opt, qs - qs0, qseq, rs - rs0, tseq, mat, bw, opt->end_bonus, r->split_inv? opt->zdrop_inv : opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, ez);
+		/*mm_align_pair(km, opt, qs - qs0, qseq, rs - rs0, tseq, mat, bw, opt->end_bonus, r->split_inv? opt->zdrop_inv : opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, ez);
         if (ez->n_cigar > 0) {
 			mm_append_cigar(r, ez->n_cigar, ez->cigar);
 			r->p->dp_score += ez->max;
-		}
+		}*/
 		rs1 = rs - (ez->reach_end? ez->mqe_t + 1 : ez->max_t + 1);
 		qs1 = qs - (ez->reach_end? qs - qs0 : ez->max_q + 1);
 		mm_seq_rev(qs - qs0, qseq);
@@ -583,13 +583,13 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 				ez->cigar = ksw_push_cigar(km, &ez->n_cigar, &ez->m_cigar, ez->cigar, 0, qe - qs);
 			} else { // perform normal gapped alignment
                 fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", qe - qs, re - rs, bw1);
-				mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
+				//mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
             }
 			// test Z-drop and inversion Z-drop
-			if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0)
-				mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, extra_flag, ez); // second pass: lift approximate
+			//if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0)
+			//	mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, extra_flag, ez); // second pass: lift approximate
 			// update CIGAR
-			if (ez->n_cigar > 0)
+			/*if (ez->n_cigar > 0)
 				mm_append_cigar(r, ez->n_cigar, ez->cigar);
 			if (ez->zdropped) { // truncated by Z-drop; TODO: sometimes Z-drop kicks in because the next seed placement is wrong. This can be fixed in principle.
 				for (j = i - 1; j >= 0; --j)
@@ -608,7 +608,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 				}
                 fprintf(stderr, "2.break\n");
 				break;
-			} else r->p->dp_score += ez->score;
+			} else r->p->dp_score += ez->score;*/
 			rs = re, qs = qe;
 		}
 	}
@@ -617,17 +617,17 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		qseq = &qseq0[rev][qe];
 		mm_idx_getseq(mi, rid, re, re0, tseq);
         fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", qe0 - qe, re0 - re, bw);
-		mm_align_pair(km, opt, qe0 - qe, qseq, re0 - re, tseq, mat, bw, opt->end_bonus, opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY, ez);
+		/*mm_align_pair(km, opt, qe0 - qe, qseq, re0 - re, tseq, mat, bw, opt->end_bonus, opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY, ez);
 		if (ez->n_cigar > 0) {
 			mm_append_cigar(r, ez->n_cigar, ez->cigar);
 			r->p->dp_score += ez->max;
 		}
 		re1 = re + (ez->reach_end? ez->mqe_t + 1 : ez->max_t + 1);
-		qe1 = qe + (ez->reach_end? qe0 - qe : ez->max_q + 1);
+		qe1 = qe + (ez->reach_end? qe0 - qe : ez->max_q + 1);*/
 	}
 	assert(qe1 <= qlen);
 
-	r->rs = rs1, r->re = re1;
+	/*r->rs = rs1, r->re = re1;
 	if (rev) r->qs = qlen - qe1, r->qe = qlen - qs1;
 	else r->qs = qs1, r->qe = qe1;
 
@@ -637,7 +637,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		mm_update_extra(r, &qseq0[r->rev][qs1], tseq, mat, opt->q, opt->e);
 		if (rev && r->p->trans_strand)
 			r->p->trans_strand ^= 3; // flip to the read strand
-	}
+	}*/
 
 	kfree(km, tseq);
 }
@@ -764,6 +764,6 @@ mm_reg1_t *mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *m
 	kfree(km, qseq0[0]);
 	kfree(km, ez.cigar);
 	mm_filter_regs(km, opt, qlen, n_regs_, regs);
-	mm_hit_sort_by_dp(km, n_regs_, regs);
+	//mm_hit_sort_by_dp(km, n_regs_, regs);
 	return regs;
 }
