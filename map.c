@@ -610,8 +610,6 @@ void* sw_result_thread(void* arg)
         //取出read上下文
         void* km = context->b->km;
         const mm_mapopt_t *opt = context->opt;
-        int8_t* mat = context->mat;
-        int32_t extra_flag = context->extra_flag;
         mm_reg1_t *r2 = context->r2;
         mm128_t *a = context->a;
         int32_t as1 = context->as1;
@@ -654,25 +652,28 @@ void* sw_result_thread(void* arg)
                 sw_context_t* sw_context = result->sw_contexts[k];
                 uint32_t i = sw_context->i;
                 uint32_t j = 0;
-                uint8_t* qseq = sw_context->qseq;
-                uint8_t* tseq = sw_context->tseq;
+                uint8_t* qseq = sw_context->query;
+                uint8_t* tseq = sw_context->target;
                 int32_t cnt1 = sw_context->cnt1;
                 int32_t re = sw_context->re;
                 int32_t qe = sw_context->qe;
+                int8_t* mat = sw_context->mat;
 
                 rs = sw_context->rs;
                 qs = sw_context->qs;
                 qs0 = sw_context->qs0;
                 fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
-                if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0)
-                    mm_align_pair(km, opt, sw_context->qlen, qseq, sw_context->tlen, tseq, mat, sw_context->w, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, extra_flag, ez); // second pass: lift approximate
+                if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0) {
+                    mm_align_pair(km, opt, sw_context->qlen, qseq, sw_context->tlen, tseq, mat, sw_context->w, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, sw_context->zdrop_flag, ez); // second pass: lift approximate
+                    fprintf(stderr, "zdrop ez->zdropped=%d\n", ez->zdropped);
+                }
                 if (ez->n_cigar > 0)
                     mm_append_cigar(r, ez->n_cigar, ez->cigar);
                 if (ez->zdropped) { // truncated by Z-drop; TODO: sometimes Z-drop kicks in because the next seed placement is wrong. This can be fixed in principle.
                     for (j = i - 1; j >= 0; --j)
                         if ((int32_t)a[as1 + j].x <= rs + ez->max_t){
-                            fprintf(stderr, "1.break, j=%d, a[as1 + j].x=%d, rs=%d, ez->max_t=%d, ez->zdropped=%d\n", j, a[as1 + j].x, rs, ez->max_t, ez->zdropped);
+                            fprintf(stderr, "1.break\n");
                             break;
                         }
                     dropped = 1;

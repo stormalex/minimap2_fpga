@@ -560,25 +560,32 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		mm_seq_rev(qs - qs0, qseq);
 		mm_seq_rev(rs - rs0, tseq);
 
-        //fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", qs - qs0, rs - rs0, bw);
-        sw_task = create_sw_task(qs - qs0, qseq, rs - rs0, tseq,
-                        mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
-                        r->split_inv? opt->zdrop_inv : opt->zdrop,
-                        opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
-                        0);
         sw_context = (sw_context_t*)malloc(sizeof(sw_context_t));
         //TODO 保存上下文
         sw_context->rs = rs;
         sw_context->qs = qs;
         sw_context->qs0 = qs0;
-
-        sw_context->qseq = qseq;
-        sw_context->tseq = tseq;
         sw_context->pos_flag = 0;
-
+        
+        sw_context->query = (uint8_t*)malloc((qs - qs0) * sizeof(uint8_t));
+        sw_context->target = (uint8_t*)malloc((rs - rs0) * sizeof(uint8_t));
+        memcpy(sw_context->query, qseq, (qs - qs0) * sizeof(uint8_t));
+        memcpy(sw_context->target, tseq, (rs - rs0) * sizeof(uint8_t));
         sw_context->qlen = qs - qs0;
         sw_context->tlen = rs - rs0;
+        memcpy(sw_context->mat, mat, sizeof(sw_context->mat));
         sw_context->w = bw;
+        sw_context->end_bonus = opt->end_bonus;
+        sw_context->zdrop = r->split_inv? opt->zdrop_inv : opt->zdrop;
+        sw_context->flag = extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR;
+        
+        //fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", qs - qs0, rs - rs0, bw);
+        sw_task = create_sw_task(qs - qs0, sw_context->query, rs - rs0, sw_context->target,
+                        sw_context->mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
+                        r->split_inv? opt->zdrop_inv : opt->zdrop,
+                        opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
+                        0);
+        
 
         add_sw_task(chain_task, sw_task, sw_context);
 		/*mm_align_pair(km, opt, qs - qs0, qseq, rs - rs0, tseq, mat, bw, opt->end_bonus, r->split_inv? opt->zdrop_inv : opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, ez);
@@ -621,20 +628,11 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 				ez->cigar = ksw_push_cigar(km, &ez->n_cigar, &ez->m_cigar, ez->cigar, 0, qe - qs);
 			} else { // perform normal gapped alignment
                 //fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", qe - qs, re - rs, bw1);
-				sw_task = create_sw_task(qe - qs, qseq, re - rs, tseq,
-                        mat, opt->q, opt->e, opt->q2, opt->e2, bw1, 
-                        opt->zdrop,
-                        -1, extra_flag|KSW_EZ_APPROX_MAX, 
-                        1);
+				
                 sw_context = (sw_context_t*)malloc(sizeof(sw_context_t));
                 //TODO 保存上下文
-                sw_context->qseq = qseq;
-                sw_context->tseq = tseq;
                 sw_context->i = i;
                 sw_context->pos_flag = 1;
-                sw_context->qlen = qe - qs;
-                sw_context->tlen = re - rs;
-                sw_context->w = bw1;
                 sw_context->cnt1 = cnt1;
                 sw_context->re = re;
                 sw_context->qe = qe;
@@ -642,6 +640,25 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                 sw_context->rs = rs;
                 sw_context->qs = qs;
                 sw_context->qs0 = qs0;
+                
+                sw_context->query = (uint8_t*)malloc((qe - qs) * sizeof(uint8_t));
+                sw_context->target = (uint8_t*)malloc((re - rs) * sizeof(uint8_t));
+                memcpy(sw_context->query, qseq, (qe - qs) * sizeof(uint8_t));
+                memcpy(sw_context->target, tseq, (re - rs) * sizeof(uint8_t));
+                sw_context->qlen = qe - qs;
+                sw_context->tlen = re - rs;
+                memcpy(sw_context->mat, mat, sizeof(sw_context->mat));
+                sw_context->w = bw1;
+                sw_context->end_bonus = -1;
+                sw_context->zdrop = opt->zdrop;
+                sw_context->flag = extra_flag|KSW_EZ_APPROX_MAX;
+                sw_context->zdrop_flag = extra_flag;
+
+                sw_task = create_sw_task(qe - qs, sw_context->query, re - rs, sw_context->target,
+                        sw_context->mat, opt->q, opt->e, opt->q2, opt->e2, bw1, 
+                        opt->zdrop,
+                        -1, extra_flag|KSW_EZ_APPROX_MAX, 
+                        1);
 
                 add_sw_task(chain_task, sw_task, sw_context);
                 //mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
@@ -678,15 +695,9 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		qseq = &qseq0[rev][qe];
 		mm_idx_getseq(mi, rid, re, re0, tseq);
         //fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", qe0 - qe, re0 - re, bw);
-        sw_task = create_sw_task(qe0 - qe, qseq, re0 - re, tseq,
-                        mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
-                        opt->zdrop,
-                        opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY, 
-                        2);
+        
         sw_context = (sw_context_t*)malloc(sizeof(sw_context_t));
         //TODO 保存上下文
-        sw_context->qlen = qe0 - qe;
-        sw_context->tlen = re0 - re;
         sw_context->w = bw;
         sw_context->pos_flag = 2;
         sw_context->re = re;
@@ -696,6 +707,24 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         sw_context->rs = rs;
         sw_context->qs = qs;
         sw_context->qs0 = qs0;
+        
+        sw_context->query = (uint8_t*)malloc((qe0 - qe) * sizeof(uint8_t));
+        sw_context->target = (uint8_t*)malloc((re0 - re) * sizeof(uint8_t));
+        memcpy(sw_context->query, qseq, (qe0 - qe) * sizeof(uint8_t));
+        memcpy(sw_context->target, tseq, (re0 - re) * sizeof(uint8_t));
+        sw_context->qlen = qe0 - qe;
+        sw_context->tlen = re0 - re;
+        memcpy(sw_context->mat, mat, sizeof(sw_context->mat));
+        sw_context->w = bw;
+        sw_context->end_bonus = opt->end_bonus;
+        sw_context->zdrop = opt->zdrop;
+        sw_context->flag = extra_flag|KSW_EZ_EXTZ_ONLY;
+
+        sw_task = create_sw_task(qe0 - qe, qseq, re0 - re, tseq,
+                        mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
+                        opt->zdrop,
+                        opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY, 
+                        2);
 
         add_sw_task(chain_task, sw_task, sw_context);
 		/*mm_align_pair(km, opt, qe0 - qe, qseq, re0 - re, tseq, mat, bw, opt->end_bonus, opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY, ez);

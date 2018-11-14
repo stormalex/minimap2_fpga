@@ -31,7 +31,6 @@ typedef struct {
     mm_reg1_t **regs;
 
     int8_t mat[25];
-    int32_t extra_flag;
     mm_reg1_t *r;
     mm_reg1_t *r2;
     int32_t as1;
@@ -48,10 +47,10 @@ typedef struct {
 
 typedef struct {
     int qlen;
-    uint8_t* query;
+    const uint8_t* query;     //指向sw上下文的query
     int tlen;
-    uint8_t* target;
-    int8_t mat[25];
+    const uint8_t* target;    //指向sw上下文的target
+    const int8_t* mat;        //指向sw上下文的mat
     int8_t q;
     int8_t e;
     int8_t q2;
@@ -64,13 +63,19 @@ typedef struct {
 }sw_task_t;
 
 typedef struct {
-    char pos_flag;
+    //保存做sw的现场
     int qlen;
+    uint8_t* query;
     int tlen;
+    uint8_t* target;
+    int8_t mat[25];
     int w;
+    int zdrop;
+    int end_bonus;
+    int flag;
+    int zdrop_flag;
     
-    uint8_t* qseq;
-    uint8_t* tseq;
+    char pos_flag;  //0:left 1:mid 2:right
     
     int32_t i;
     int32_t cnt1;
