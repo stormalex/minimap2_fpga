@@ -424,7 +424,7 @@ typedef struct {
 } step_t;
 
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
-{
+{fprintf(stderr, "read:%ld\n", i);
     step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];
@@ -460,8 +460,10 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 		}*/
 }
 
-static long read_num = 0;
-static char* read_flag = NULL;
+typedef struct {
+    char* read_flag;
+    long read_num;
+}sw_result_params_t;
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
@@ -495,24 +497,25 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
-        read_num = ((step_t*)in)->n_frag;
-        read_flag = (char*)malloc(read_num);
-        memset(read_flag, 0xff, read_num);
+        sw_result_params_t params;
+        params.read_num = ((step_t*)in)->n_frag;
+        params.read_flag = (char*)malloc(params.read_num);
+        memset(params.read_flag, 0, params.read_num);
 
         //TODO 处理结果的线程
         pthread_t sw_tid;
-        pthread_create(&sw_tid, NULL, sw_result_thread, &read_num);
+        pthread_create(&sw_tid, NULL, sw_result_thread, &params);
 
 		kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
 
-        if(read_num == 0) {
-            fprintf(stderr, "%ld read ok!\n", read_num);
+        if(params.read_num == 0) {
+            fprintf(stderr, "%ld read ok!\n", params.read_num);
         }
         else {
-            fprintf(stderr, "%ld read do not process!\n", read_num);
+            fprintf(stderr, "%ld read do not process!\n", params.read_num);
         }
         pthread_join(sw_tid, NULL);
-        while(read_num);
+        while(params.read_num);
 		return in;
     } else if (step == 2) { // step 2: output
 		void *km = 0;
@@ -595,7 +598,7 @@ int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int
 
 void* sw_result_thread(void* arg)
 {
-    long read_num = *((long*)arg);
+    sw_result_params_t *params = (sw_result_params_t*)arg;
     int k = 0;
     while(1) {
         sw_result_t* result = get_result();
@@ -608,20 +611,26 @@ void* sw_result_thread(void* arg)
         mm_reg1_t *r = &(context->regs0[chain_context->i]);
         
         //取出read上下文
+        const mm_idx_t *mi = context->mi;
         void* km = context->b->km;
         const mm_mapopt_t *opt = context->opt;
         mm_reg1_t *r2 = context->r2;
         mm128_t *a = context->a;
-        int32_t as1 = context->as1;
         int qlen = context->qlen;
         int32_t rev = context->rev;
+        int8_t* mat = context->mat;
         
         int32_t rs = chain_context->rs;
         int32_t qs = chain_context->qs;
         int32_t qs0 = chain_context->qs0;
         
-        fprintf(stderr, "n_regs=%d, i=%d\n", context->n_regs0, chain_context->i);
+        long read_index = context->read_index;
+        if(params->read_flag[read_index] == 1) {  //这个read后面的chain就不能做了，这条read的所有chain都需要重做
+            //TODO 这条read的regs和a需要抛弃
+            continue;
+        }
         
+		fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", context->n_regs0, chain_context->i, read_index);
         if(result->sw_contexts[0]->pos_flag == 0) {  //left
             k = 1;  //有左扩展
             ksw_extz_t* ez = result->ezs[0];
@@ -657,7 +666,7 @@ void* sw_result_thread(void* arg)
                 int32_t cnt1 = sw_context->cnt1;
                 int32_t re = sw_context->re;
                 int32_t qe = sw_context->qe;
-                int8_t* mat = sw_context->mat;
+                int32_t as1 = sw_context->as1;
 
                 rs = sw_context->rs;
                 qs = sw_context->qs;
@@ -670,11 +679,13 @@ void* sw_result_thread(void* arg)
                 if (ez->n_cigar > 0)
                     mm_append_cigar(r, ez->n_cigar, ez->cigar);
                 if (ez->zdropped) { // truncated by Z-drop; TODO: sometimes Z-drop kicks in because the next seed placement is wrong. This can be fixed in principle.
-                    for (j = i - 1; j >= 0; --j)
+                    for (j = i - 1; j >= 0; --j) {
+                        fprintf(stderr, "a=%p as1=%d j=%d a[as1 + j].x=%d rs=%d rs+ez->max_t=%d\n", a, as1, j, (int32_t)a[as1 + j].x, rs, rs + ez->max_t);
                         if ((int32_t)a[as1 + j].x <= rs + ez->max_t){
                             fprintf(stderr, "1.break\n");
                             break;
                         }
+                    }
                     dropped = 1;
                     if (j < 0) j = 0;
                     r->p->dp_score += ez->max;
@@ -723,6 +734,14 @@ void* sw_result_thread(void* arg)
         r->rs = rs1, r->re = re1;
         if (rev) r->qs = qlen - qe1, r->qe = qlen - qs1;
         else r->qs = qs1, r->qe = qe1;
+        
+        assert(re1 - rs1 <= chain_context->re0 - chain_context->rs0);
+        if (r->p) {
+            mm_idx_getseq(mi, chain_context->rid, rs1, re1, chain_context->tseq);
+            mm_update_extra(r, &chain_context->qseq0[r->rev][qs1], chain_context->tseq, mat, opt->q, opt->e);
+            if (rev && r->p->trans_strand)
+                r->p->trans_strand ^= 3; // flip to the read strand
+        }
         
         //销毁结果数组和所有上下文
     }

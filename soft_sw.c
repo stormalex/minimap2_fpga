@@ -194,7 +194,7 @@ sw_task_t* create_sw_task(int qlen,
         new_task->query = query;
         new_task->tlen = tlen;
         new_task->target = target;
-        new_task->mat = mat;
+        memcpy(new_task->mat, mat, sizeof(new_task->mat));
         new_task->q = q;
         new_task->e = e;
         new_task->q2 = q2;

@@ -19,6 +19,7 @@ typedef struct {
    
     //align_regs context
     mm_tbuf_t *b;
+    const mm_idx_t *mi;
     const mm_mapopt_t *opt;
     int qlen;
     const char* seq;
@@ -33,9 +34,10 @@ typedef struct {
     int8_t mat[25];
     mm_reg1_t *r;
     mm_reg1_t *r2;
-    int32_t as1;
 
     int32_t rev;
+    
+    uint8_t *qseq0;     //结果处理完要释放
 }context_t;
 
 typedef struct {
@@ -43,6 +45,13 @@ typedef struct {
     int32_t rs;
     int32_t qs;
     int32_t qs0;
+    
+    int32_t rid;
+    uint8_t* tseq;  //一个chain做完要释放
+    uint8_t* qseq0[2]; //一个chain做完要释放
+    
+    int32_t re0;
+    int32_t rs0;
 }chain_context_t;
 
 typedef struct {
@@ -50,7 +59,7 @@ typedef struct {
     const uint8_t* query;     //指向sw上下文的query
     int tlen;
     const uint8_t* target;    //指向sw上下文的target
-    const int8_t* mat;        //指向sw上下文的mat
+    int8_t mat[25];
     int8_t q;
     int8_t e;
     int8_t q2;
@@ -68,7 +77,6 @@ typedef struct {
     uint8_t* query;
     int tlen;
     uint8_t* target;
-    int8_t mat[25];
     int w;
     int zdrop;
     int end_bonus;
@@ -87,6 +95,8 @@ typedef struct {
     int32_t rs;
     int32_t qs;
     int32_t qs0;
+    
+    int32_t as1;
 }sw_context_t;
 
 typedef struct {

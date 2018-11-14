@@ -147,7 +147,7 @@ static void mm_fix_cigar(mm_reg1_t *r, const uint8_t *qseq, const uint8_t *tseq,
 	}
 }
 
-static void mm_update_extra(mm_reg1_t *r, const uint8_t *qseq, const uint8_t *tseq, const int8_t *mat, int8_t q, int8_t e)
+void mm_update_extra(mm_reg1_t *r, const uint8_t *qseq, const uint8_t *tseq, const int8_t *mat, int8_t q, int8_t e)
 {
 	uint32_t k, l, toff = 0, qoff = 0;
 	int32_t s = 0, max = 0, qshift, tshift;
@@ -540,6 +540,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	}
 
 	assert(re0 > rs0);
+    int tseq_len = re0 - rs0;
 	tseq = (uint8_t*)kmalloc(km, re0 - rs0);
 
     //创建一个chain的sw任务
@@ -547,10 +548,13 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
     context->r2 = r2;
     context->tseq = tseq;
     context->rev = rev;
+    memcpy(context->mat, mat, sizeof(context->mat));
+	context->mi = mi;
 
     chain_context->rs = rs;
     chain_context->qs = qs;
     chain_context->qs0 = qs0;
+    chain_context->rid = rid;
 
     sw_task_t* sw_task = NULL;
     sw_context_t* sw_context = NULL;
@@ -573,7 +577,6 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         memcpy(sw_context->target, tseq, (rs - rs0) * sizeof(uint8_t));
         sw_context->qlen = qs - qs0;
         sw_context->tlen = rs - rs0;
-        memcpy(sw_context->mat, mat, sizeof(sw_context->mat));
         sw_context->w = bw;
         sw_context->end_bonus = opt->end_bonus;
         sw_context->zdrop = r->split_inv? opt->zdrop_inv : opt->zdrop;
@@ -581,7 +584,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         
         //fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", qs - qs0, rs - rs0, bw);
         sw_task = create_sw_task(qs - qs0, sw_context->query, rs - rs0, sw_context->target,
-                        sw_context->mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
+                        mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
                         r->split_inv? opt->zdrop_inv : opt->zdrop,
                         opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
                         0);
@@ -647,15 +650,15 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                 memcpy(sw_context->target, tseq, (re - rs) * sizeof(uint8_t));
                 sw_context->qlen = qe - qs;
                 sw_context->tlen = re - rs;
-                memcpy(sw_context->mat, mat, sizeof(sw_context->mat));
                 sw_context->w = bw1;
                 sw_context->end_bonus = -1;
                 sw_context->zdrop = opt->zdrop;
                 sw_context->flag = extra_flag|KSW_EZ_APPROX_MAX;
                 sw_context->zdrop_flag = extra_flag;
+                sw_context->as1 = as1;
 
                 sw_task = create_sw_task(qe - qs, sw_context->query, re - rs, sw_context->target,
-                        sw_context->mat, opt->q, opt->e, opt->q2, opt->e2, bw1, 
+                        mat, opt->q, opt->e, opt->q2, opt->e2, bw1, 
                         opt->zdrop,
                         -1, extra_flag|KSW_EZ_APPROX_MAX, 
                         1);
@@ -714,7 +717,6 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         memcpy(sw_context->target, tseq, (re0 - re) * sizeof(uint8_t));
         sw_context->qlen = qe0 - qe;
         sw_context->tlen = re0 - re;
-        memcpy(sw_context->mat, mat, sizeof(sw_context->mat));
         sw_context->w = bw;
         sw_context->end_bonus = opt->end_bonus;
         sw_context->zdrop = opt->zdrop;
@@ -736,6 +738,15 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		qe1 = qe + (ez->reach_end? qe0 - qe : ez->max_q + 1);*/
 	}
 	//assert(qe1 <= qlen);
+
+    chain_context->rid = rid;
+    chain_context->re0 = re0;
+    chain_context->rs0 = rs0;
+    chain_context->tseq = (uint8_t*)malloc(tseq_len);
+    memcpy(chain_context->tseq, tseq, tseq_len);
+    chain_context->qseq0[0] = (uint8_t*)malloc(qlen * 2);
+    chain_context->qseq0[1] = chain_context->qseq0[0] + qlen;
+    memcpy(chain_context->qseq0[0], qseq0[0], qlen * 2);
 
 	/*r->rs = rs1, r->re = re1;
 	if (rev) r->qs = qlen - qe1, r->qe = qlen - qs1;
@@ -844,6 +855,7 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
     memcpy(context->a, a, n_a * sizeof(mm128_t));
     context->n_regs0 = n_regs;
     context->n_a = n_a;
+    context->read_index = read_index;
     
 	//memset(&ez, 0, sizeof(ksw_extz_t));
 	for (i = 0; i < n_regs; ++i) {
