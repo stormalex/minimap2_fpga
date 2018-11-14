@@ -30,9 +30,6 @@ typedef struct {
     int *n_regs;
     mm_reg1_t **regs;
 
-    int32_t rs;
-    int32_t qs;
-    int32_t qs0;
     int8_t mat[25];
     int32_t extra_flag;
     mm_reg1_t *r;
@@ -44,6 +41,9 @@ typedef struct {
 
 typedef struct {
     int32_t i;
+    int32_t rs;
+    int32_t qs;
+    int32_t qs0;
 }chain_context_t;
 
 typedef struct {
@@ -78,6 +78,10 @@ typedef struct {
     int32_t re;
     int32_t qe;
     int32_t qe0;
+    
+    int32_t rs;
+    int32_t qs;
+    int32_t qs0;
 }sw_context_t;
 
 typedef struct {

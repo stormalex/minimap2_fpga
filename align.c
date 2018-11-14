@@ -548,6 +548,10 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
     context->tseq = tseq;
     context->rev = rev;
 
+    chain_context->rs = rs;
+    chain_context->qs = qs;
+    chain_context->qs0 = qs0;
+
     sw_task_t* sw_task = NULL;
     sw_context_t* sw_context = NULL;
 	if (qs > 0 && rs > 0) { // left extension
@@ -564,9 +568,9 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                         0);
         sw_context = (sw_context_t*)malloc(sizeof(sw_context_t));
         //TODO 保存上下文
-        context->rs = rs;
-        context->qs = qs;
-        context->qs0 = qs0;
+        sw_context->rs = rs;
+        sw_context->qs = qs;
+        sw_context->qs0 = qs0;
 
         sw_context->qseq = qseq;
         sw_context->tseq = tseq;
@@ -635,6 +639,10 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                 sw_context->re = re;
                 sw_context->qe = qe;
 
+                sw_context->rs = rs;
+                sw_context->qs = qs;
+                sw_context->qs0 = qs0;
+
                 add_sw_task(chain_task, sw_task, sw_context);
                 //mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
             }
@@ -684,6 +692,10 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         sw_context->re = re;
         sw_context->qe = qe;
         sw_context->qe0 = qe0;
+
+        sw_context->rs = rs;
+        sw_context->qs = qs;
+        sw_context->qs0 = qs0;
 
         add_sw_task(chain_task, sw_task, sw_context);
 		/*mm_align_pair(km, opt, qe0 - qe, qseq, re0 - re, tseq, mat, bw, opt->end_bonus, opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY, ez);

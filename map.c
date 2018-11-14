@@ -607,7 +607,7 @@ void* sw_result_thread(void* arg)
         int32_t dropped = 0;
         mm_reg1_t *r = &(context->regs0[chain_context->i]);
         
-        //取出上下文
+        //取出read上下文
         void* km = context->b->km;
         const mm_mapopt_t *opt = context->opt;
         int8_t* mat = context->mat;
@@ -615,18 +615,22 @@ void* sw_result_thread(void* arg)
         mm_reg1_t *r2 = context->r2;
         mm128_t *a = context->a;
         int32_t as1 = context->as1;
-        int32_t rs = context->rs;
-        int32_t qs = context->qs;
-        int32_t qs0 = context->qs0;
         int qlen = context->qlen;
-
         int32_t rev = context->rev;
+        
+        int32_t rs = chain_context->rs;
+        int32_t qs = chain_context->qs;
+        int32_t qs0 = chain_context->qs0;
+        
+        fprintf(stderr, "n_regs=%d, i=%d\n", context->n_regs0, chain_context->i);
         
         if(result->sw_contexts[0]->pos_flag == 0) {  //left
             k = 1;  //有左扩展
             ksw_extz_t* ez = result->ezs[0];
             sw_context_t* sw_context = result->sw_contexts[0];
-
+            rs = sw_context->rs;
+            qs = sw_context->rs;
+            qs0 = sw_context->rs;
             fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
             
             if (ez->n_cigar > 0) {
@@ -656,6 +660,9 @@ void* sw_result_thread(void* arg)
                 int32_t re = sw_context->re;
                 int32_t qe = sw_context->qe;
 
+                rs = sw_context->rs;
+                qs = sw_context->rs;
+                qs0 = sw_context->rs;
                 fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
                 if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0)
@@ -664,8 +671,10 @@ void* sw_result_thread(void* arg)
                     mm_append_cigar(r, ez->n_cigar, ez->cigar);
                 if (ez->zdropped) { // truncated by Z-drop; TODO: sometimes Z-drop kicks in because the next seed placement is wrong. This can be fixed in principle.
                     for (j = i - 1; j >= 0; --j)
-                        if ((int32_t)a[as1 + j].x <= rs + ez->max_t)
+                        if ((int32_t)a[as1 + j].x <= rs + ez->max_t){
+                            fprintf(stderr, "1.break\n");
                             break;
+                        }
                     dropped = 1;
                     if (j < 0) j = 0;
                     r->p->dp_score += ez->max;
@@ -675,6 +684,7 @@ void* sw_result_thread(void* arg)
                         mm_split_reg(r, r2, as1 + j + 1 - r->as, qlen, a);
                         if (zdrop_code == 2) r2->split_inv = 1;
                     }
+                    fprintf(stderr, "2.break\n");
                     break;
                 } else r->p->dp_score += ez->score;
                 rs = re, qs = qe;
@@ -695,6 +705,9 @@ void* sw_result_thread(void* arg)
                 int32_t qe = sw_context->qe;
                 int32_t qe0 = sw_context->qe0;
 
+                rs = sw_context->rs;
+                qs = sw_context->rs;
+                qs0 = sw_context->rs;
                 fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
                 if (ez->n_cigar > 0) {
