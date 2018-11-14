@@ -81,11 +81,11 @@ int task_is_empty()
 
 int send_task(chain_sw_task_t* chain_sw_tasks)
 {
+    //sleep(1);
     pthread_mutex_lock(&tasks_mutex);
     if (task_is_full()) {
         pthread_mutex_unlock(&tasks_mutex);
         fprintf(stderr, "task ringbuf is full\n");
-        sleep(1);
         return -1;
     }
     
@@ -94,25 +94,23 @@ int send_task(chain_sw_task_t* chain_sw_tasks)
     tasks_tail = (tasks_tail + 1) % CHAIN_TASK_NUM;
         
     pthread_mutex_unlock(&tasks_mutex);
-    sleep(1);
     return 0;
 }
 
 chain_sw_task_t* get_task()
 {
     chain_sw_task_t* tmp;
+    //sleep(1);
     pthread_mutex_lock(&tasks_mutex);
     if (task_is_empty()) {
         pthread_mutex_unlock(&tasks_mutex);
-        fprintf(stderr, "task ringbuf is empty\n");
-        sleep(1);
+        //fprintf(stderr, "task ringbuf is empty\n");
         return NULL;
     }
     tmp = chain_tasks_array[tasks_head];
     //fprintf(stderr, "task take from %d\n", tasks_head);
     tasks_head = (tasks_head + 1) % CHAIN_TASK_NUM;
     pthread_mutex_unlock(&tasks_mutex);
-    sleep(1);
     return tmp;
 }
 
@@ -160,11 +158,11 @@ int send_result(sw_result_t* results)
 sw_result_t* get_result()
 {
     sw_result_t* tmp;
-    sleep(1);
+    //sleep(1);
     pthread_mutex_lock(&results_mutex);
     if (result_is_empty()) {
         pthread_mutex_unlock(&results_mutex);
-        fprintf(stderr, "result ringbuf is empty\n");
+        //fprintf(stderr, "result ringbuf is empty\n");
         return NULL;
     }
     tmp = results_array[results_head];
@@ -281,7 +279,7 @@ void add_result(sw_result_t* result, ksw_extz_t* ez)
             result->result_size = 32;
         else if(result->result_size == result->result_num) {
             result->result_size = result->result_size*2;
-            fprintf(stderr, "result->result_size=%d\n", result->result_size);
+            //fprintf(stderr, "result->result_size=%d\n", result->result_size);
             result->ezs = (ksw_extz_t**)realloc(result->ezs, result->result_size * sizeof(ksw_extz_t*));
         }
         result->ezs[result->result_num] = ez;
@@ -335,7 +333,7 @@ void* sw_thread(void* arg)
         result->sw_contexts = chain_tasks->sw_contexts;
         result->chain_context = chain_tasks->chain_context;
         destroy_chain_sw_task(chain_tasks);
-        send_result(result);
+        while(send_result(result));
     }
     return NULL;
 }

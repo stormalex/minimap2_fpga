@@ -666,7 +666,6 @@ void* sw_result_thread(void* arg)
                 
                 if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0) {
                     mm_align_pair(km, opt, sw_context->qlen, qseq, sw_context->tlen, tseq, mat, sw_context->w, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, sw_context->zdrop_flag, ez); // second pass: lift approximate
-                    fprintf(stderr, "zdrop ez->zdropped=%d\n", ez->zdropped);
                 }
                 if (ez->n_cigar > 0)
                     mm_append_cigar(r, ez->n_cigar, ez->cigar);
