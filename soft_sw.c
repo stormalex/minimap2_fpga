@@ -90,7 +90,7 @@ int send_task(chain_sw_task_t* chain_sw_tasks)
     }
     
     chain_tasks_array[tasks_tail] = chain_sw_tasks;
-    fprintf(stderr, "task insert to %d\n", tasks_tail);
+    //fprintf(stderr, "task insert to %d\n", tasks_tail);
     tasks_tail = (tasks_tail + 1) % CHAIN_TASK_NUM;
         
     pthread_mutex_unlock(&tasks_mutex);
@@ -109,7 +109,7 @@ chain_sw_task_t* get_task()
         return NULL;
     }
     tmp = chain_tasks_array[tasks_head];
-    fprintf(stderr, "task take from %d\n", tasks_head);
+    //fprintf(stderr, "task take from %d\n", tasks_head);
     tasks_head = (tasks_head + 1) % CHAIN_TASK_NUM;
     pthread_mutex_unlock(&tasks_mutex);
     sleep(1);
@@ -150,7 +150,7 @@ int send_result(sw_result_t* results)
     }
     
     results_array[results_tail] = results;
-    fprintf(stderr, "result insert to %d\n", results_tail);
+    //fprintf(stderr, "result insert to %d\n", results_tail);
     results_tail = (results_tail + 1) % CHAIN_RESULT_NUM;
         
     pthread_mutex_unlock(&results_mutex);
@@ -160,6 +160,7 @@ int send_result(sw_result_t* results)
 sw_result_t* get_result()
 {
     sw_result_t* tmp;
+    sleep(1);
     pthread_mutex_lock(&results_mutex);
     if (result_is_empty()) {
         pthread_mutex_unlock(&results_mutex);
@@ -170,6 +171,7 @@ sw_result_t* get_result()
     results_head = (results_head + 1) % CHAIN_RESULT_NUM;
     
     pthread_mutex_unlock(&results_mutex);
+    
     return tmp;
 }
 
@@ -224,14 +226,16 @@ void destroy_sw_task(sw_task_t* sw_task)
     return;
 }
 
-chain_sw_task_t* create_chain_sw_task(context_t* context)
+chain_sw_task_t* create_chain_sw_task(context_t* context, chain_context_t* chain_context)
 {
     chain_sw_task_t* new_chain_sw_task = (chain_sw_task_t *)malloc(sizeof(chain_sw_task_t));
     if(new_chain_sw_task != NULL) {
         new_chain_sw_task->context = context;
+        new_chain_sw_task->chain_context = chain_context;
         new_chain_sw_task->sw_num = 0;
         new_chain_sw_task->sw_size = 32;
         new_chain_sw_task->sw_tasks = (sw_task_t**)malloc(new_chain_sw_task->sw_size * sizeof(sw_task_t*));
+        new_chain_sw_task->sw_contexts = (sw_context_t**)malloc(new_chain_sw_task->sw_size * sizeof(sw_context_t*));
     }
     return new_chain_sw_task;
 }
@@ -249,17 +253,19 @@ void destroy_chain_sw_task(chain_sw_task_t* chain_sw_task)
     return;
 }
 
-void add_sw_task(chain_sw_task_t* chain_sw_task, sw_task_t* sw_task)
+void add_sw_task(chain_sw_task_t* chain_sw_task, sw_task_t* sw_task, sw_context_t* sw_context)
 {
-    if(chain_sw_task != NULL && sw_task != NULL) {
+    if(chain_sw_task != NULL && sw_task != NULL && sw_context != NULL) {
         if(chain_sw_task->sw_size == 0)
             chain_sw_task->sw_size = 32;
         else if(chain_sw_task->sw_size == chain_sw_task->sw_num) {
             chain_sw_task->sw_size = chain_sw_task->sw_size*2;
             //fprintf(stderr, "chain_sw_task(%p)->sw_size=%d\n", chain_sw_task, chain_sw_task->sw_size);
             chain_sw_task->sw_tasks = (sw_task_t**)realloc(chain_sw_task->sw_tasks, chain_sw_task->sw_size * sizeof(sw_task_t*));
+            chain_sw_task->sw_contexts = (sw_context_t**)realloc(chain_sw_task->sw_contexts, chain_sw_task->sw_size * sizeof(sw_context_t*));
         }
         chain_sw_task->sw_tasks[chain_sw_task->sw_num] = sw_task;
+        chain_sw_task->sw_contexts[chain_sw_task->sw_num] = sw_context;
         chain_sw_task->sw_num++;
     }
     return;
@@ -271,7 +277,6 @@ sw_result_t* create_result()
     if(new_result != NULL) {
         new_result->result_num = 0;
         new_result->result_size = 32;
-        memset(new_result->pos_flag, 0xff, sizeof(new_result->pos_flag));
         new_result->ezs = (ksw_extz_t**)malloc(new_result->result_size * sizeof(ksw_extz_t*));
     }
     return new_result;
@@ -331,16 +336,12 @@ void* sw_thread(void* arg)
             sw_task_t* task = chain_tasks->sw_tasks[i];
             
             ksw_extd2_sse(NULL, task->qlen, task->query, task->tlen, task->target, 5, task->mat, task->q, task->e, task->q2, task->e2, task->w, task->zdrop, task->end_bonus, task->flag, ez);
-            result->pos_flag[i] = task->position;
-
-            //for debug
-            result->qlen[i] = task->qlen;
-            result->tlen[i] = task->tlen;
-            result->w[i] = task->w;
 
             add_result(result, ez);
         }
         result->context = chain_tasks->context;
+        result->sw_contexts = chain_tasks->sw_contexts;
+        result->chain_context = chain_tasks->chain_context;
         destroy_chain_sw_task(chain_tasks);
         send_result(result);
     }

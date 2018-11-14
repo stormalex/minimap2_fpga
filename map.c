@@ -352,9 +352,9 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
         context->opt = opt;
         context->qlen = qlens[0];
         context->seq = seqs[0];
-        context->n_regs0 = n_regs0;
-        context->regs0 = regs0;
-        context->a = a;
+        //context->n_regs0 = n_regs0;
+        //context->regs0 = regs0;
+        //context->a = a;
         context->read_index = read_index;
         context->rep_len = rep_len;
         context->n_regs = n_regs;
@@ -596,25 +596,121 @@ int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int
 void* sw_result_thread(void* arg)
 {
     long read_num = *((long*)arg);
-    int i = 0;
+    int k = 0;
     while(1) {
         sw_result_t* result = get_result();
+        if(result == NULL)
+            continue;
         context_t* context = result->context;
+        chain_context_t* chain_context = result->chain_context;
+        int32_t rs1, qs1, re1, qe1;
+        int32_t dropped = 0;
+        mm_reg1_t *r = &(context->regs0[chain_context->i]);
+        
+        //取出上下文
+        void* km = context->b->km;
+        const mm_mapopt_t *opt = context->opt;
+        int8_t* mat = context->mat;
+        int32_t extra_flag = context->extra_flag;
+        mm_reg1_t *r2 = context->r2;
+        mm128_t *a = context->a;
+        int32_t as1 = context->as1;
+        int32_t rs = context->rs;
+        int32_t qs = context->qs;
+        int32_t qs0 = context->qs0;
+        int qlen = context->qlen;
 
-        for(i = 0; i < result->result_num; i++) {
-            if(result->pos_flag[i] == 0) {  //left
-                fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", result->qlen[i], result->tlen[i], result->w[i]);
+        int32_t rev = context->rev;
+        
+        if(result->sw_contexts[0]->pos_flag == 0) {  //left
+            k = 1;  //有左扩展
+            ksw_extz_t* ez = result->ezs[0];
+            sw_context_t* sw_context = result->sw_contexts[0];
 
+            fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
+            
+            if (ez->n_cigar > 0) {
+                mm_append_cigar(r, ez->n_cigar, ez->cigar);
+                r->p->dp_score += ez->max;
             }
-            else if(result->pos_flag[i] == 1) {     //gap
-                fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", result->qlen[i], result->tlen[i], result->w[i]);
+            rs1 = rs - (ez->reach_end? ez->mqe_t + 1 : ez->max_t + 1);
+            qs1 = qs - (ez->reach_end? qs - qs0 : ez->max_q + 1);
+        }
+        else {
+            k = 0;  //没有左扩展
+            rs1 = rs, qs1 = qs;
+        }
+        re1 = rs, qe1 = qs;
+        assert(qs1 >= 0 && rs1 >= 0);
+
+        for(; k < result->result_num; k++) {    //gap
+            if(result->sw_contexts[k]->pos_flag == 1) {
+                int zdrop_code;
+                ksw_extz_t* ez = result->ezs[k];
+                sw_context_t* sw_context = result->sw_contexts[k];
+                uint32_t i = sw_context->i;
+                uint32_t j = 0;
+                uint8_t* qseq = sw_context->qseq;
+                uint8_t* tseq = sw_context->tseq;
+                int32_t cnt1 = sw_context->cnt1;
+                int32_t re = sw_context->re;
+                int32_t qe = sw_context->qe;
+
+                fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
+                
+                if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0)
+                    mm_align_pair(km, opt, sw_context->qlen, qseq, sw_context->tlen, tseq, mat, sw_context->w, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, extra_flag, ez); // second pass: lift approximate
+                if (ez->n_cigar > 0)
+                    mm_append_cigar(r, ez->n_cigar, ez->cigar);
+                if (ez->zdropped) { // truncated by Z-drop; TODO: sometimes Z-drop kicks in because the next seed placement is wrong. This can be fixed in principle.
+                    for (j = i - 1; j >= 0; --j)
+                        if ((int32_t)a[as1 + j].x <= rs + ez->max_t)
+                            break;
+                    dropped = 1;
+                    if (j < 0) j = 0;
+                    r->p->dp_score += ez->max;
+                    re1 = rs + (ez->max_t + 1);
+                    qe1 = qs + (ez->max_q + 1);
+                    if (cnt1 - (j + 1) >= opt->min_cnt) {
+                        mm_split_reg(r, r2, as1 + j + 1 - r->as, qlen, a);
+                        if (zdrop_code == 2) r2->split_inv = 1;
+                    }
+                    break;
+                } else r->p->dp_score += ez->score;
+                rs = re, qs = qe;
             }
-            else if(result->pos_flag[i] == 2) {     //right
-                fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", result->qlen[i], result->tlen[i], result->w[i]);
+            else if(result->sw_contexts[k]->pos_flag == 2) {     //right
+                break;
             }
             else {
-                fprintf(stderr, "error position flag(%d), read_index:%ld\n", (int)(result->pos_flag[i]), context->read_index);
+                fprintf(stderr, "error position flag(%d), read_index:%ld\n", result->sw_contexts[k]->pos_flag, context->read_index);
             }
         }
+
+        if(result->sw_contexts[k]->pos_flag == 2) {      //right
+            if(!dropped) {
+                ksw_extz_t* ez = result->ezs[k];
+                sw_context_t* sw_context = result->sw_contexts[k];
+                int32_t re = sw_context->re;
+                int32_t qe = sw_context->qe;
+                int32_t qe0 = sw_context->qe0;
+
+                fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
+                
+                if (ez->n_cigar > 0) {
+                    mm_append_cigar(r, ez->n_cigar, ez->cigar);
+                    r->p->dp_score += ez->max;
+                }
+                re1 = re + (ez->reach_end? ez->mqe_t + 1 : ez->max_t + 1);
+                qe1 = qe + (ez->reach_end? qe0 - qe : ez->max_q + 1);
+            }
+        }
+        
+        assert(qe1 <= qlen);
+        r->rs = rs1, r->re = re1;
+        if (rev) r->qs = qlen - qe1, r->qe = qlen - qs1;
+        else r->qs = qs1, r->qe = qe1;
+        
+        //销毁结果数组和所有上下文
     }
 }
