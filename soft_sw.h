@@ -4,9 +4,9 @@
 #include "minimap.h"
 #include "ksw2.h"
 
-#define CONTEXT_NUM     1024    //保存上下文数量
-#define CHAIN_TASK_NUM     1024    //保存chain任务的数量
-#define CHAIN_RESULT_NUM     1024    //保存chain结果的数量
+#define CONTEXT_NUM     4096    //保存上下文数量
+#define CHAIN_TASK_NUM     4096    //保存chain任务的数量
+#define CHAIN_RESULT_NUM     4096    //保存chain结果的数量
 
 typedef struct {
     //原始数据
@@ -33,7 +33,6 @@ typedef struct {
 
     int8_t mat[25];
     mm_reg1_t *r;
-    mm_reg1_t *r2;
 
     int32_t rev;
     

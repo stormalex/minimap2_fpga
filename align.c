@@ -545,7 +545,6 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 
     //创建一个chain的sw任务
     chain_sw_task_t* chain_task = create_chain_sw_task(context, chain_context);
-    context->r2 = r2;
     context->tseq = tseq;
     context->rev = rev;
     memcpy(context->mat, mat, sizeof(context->mat));
@@ -763,7 +762,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	kfree(km, tseq);
 }
 
-static int mm_align1_inv(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], const mm_reg1_t *r1, const mm_reg1_t *r2, mm_reg1_t *r_inv, ksw_extz_t *ez)
+int mm_align1_inv(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], const mm_reg1_t *r1, const mm_reg1_t *r2, mm_reg1_t *r_inv, ksw_extz_t *ez)
 {
 	int tl, ql, score, ret = 0, q_off, t_off;
 	uint8_t *tseq, *qseq;

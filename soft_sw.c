@@ -85,7 +85,7 @@ int send_task(chain_sw_task_t* chain_sw_tasks)
     pthread_mutex_lock(&tasks_mutex);
     if (task_is_full()) {
         pthread_mutex_unlock(&tasks_mutex);
-        fprintf(stderr, "task ringbuf is full\n");
+        //fprintf(stderr, "task ringbuf is full\n");
         return -1;
     }
     
@@ -143,7 +143,7 @@ int send_result(sw_result_t* results)
     pthread_mutex_lock(&results_mutex);
     if (result_is_full()) {
         pthread_mutex_unlock(&results_mutex);
-        fprintf(stderr, "result ringbuf is full\n");
+        //fprintf(stderr, "result ringbuf is full\n");
         return -1;
     }
     

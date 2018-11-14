@@ -424,7 +424,7 @@ typedef struct {
 } step_t;
 
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
-{fprintf(stderr, "read:%ld\n", i);
+{
     step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];
@@ -608,13 +608,15 @@ void* sw_result_thread(void* arg)
         chain_context_t* chain_context = result->chain_context;
         int32_t rs1, qs1, re1, qe1;
         int32_t dropped = 0;
+        mm_reg1_t r2;
+
         mm_reg1_t *r = &(context->regs0[chain_context->i]);
+        mm_reg1_t *regs = context->regs0;
         
         //取出read上下文
         const mm_idx_t *mi = context->mi;
         void* km = context->b->km;
         const mm_mapopt_t *opt = context->opt;
-        mm_reg1_t *r2 = context->r2;
         mm128_t *a = context->a;
         int qlen = context->qlen;
         int32_t rev = context->rev;
@@ -687,13 +689,14 @@ void* sw_result_thread(void* arg)
                         }
                     }
                     dropped = 1;
+
                     if (j < 0) j = 0;
                     r->p->dp_score += ez->max;
                     re1 = rs + (ez->max_t + 1);
                     qe1 = qs + (ez->max_q + 1);
                     if (cnt1 - (j + 1) >= opt->min_cnt) {
-                        mm_split_reg(r, r2, as1 + j + 1 - r->as, qlen, a);
-                        if (zdrop_code == 2) r2->split_inv = 1;
+                        mm_split_reg(r, &r2, as1 + j + 1 - r->as, qlen, a);
+                        if (zdrop_code == 2) r2.split_inv = 1;
                     }
                     fprintf(stderr, "2.break\n");
                     break;
@@ -743,6 +746,22 @@ void* sw_result_thread(void* arg)
                 r->p->trans_strand ^= 3; // flip to the read strand
         }
         
+        if(r2.cnt > 0) {   //此时这条read需要重新做sw
+            fprintf(stderr, "1.insert chain\n");
+            params->read_flag[read_index] = 1;
+            //regs = mm_insert_reg(&r2, i, &n_regs, regs);
+        }
+        if (chain_context->i > 0 && regs[chain_context->i].split_inv) {
+            ksw_extz_t tmp_ez;
+			if (mm_align1_inv(km, opt, mi, qlen, chain_context->qseq0, &regs[chain_context->i-1], &regs[chain_context->i], &r2, &tmp_ez)) {
+                //此时这条read需要重新做sw
+                fprintf(stderr, "2.insert chain\n");
+                params->read_flag[read_index] = 1;
+				//regs = mm_insert_reg(&r2, i, &n_regs, regs);
+				//++i; // skip the inserted INV alignment
+			}
+            kfree(km, tmp_ez.cigar);
+		}
         //销毁结果数组和所有上下文
     }
 }
