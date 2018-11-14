@@ -629,8 +629,8 @@ void* sw_result_thread(void* arg)
             ksw_extz_t* ez = result->ezs[0];
             sw_context_t* sw_context = result->sw_contexts[0];
             rs = sw_context->rs;
-            qs = sw_context->rs;
-            qs0 = sw_context->rs;
+            qs = sw_context->qs;
+            qs0 = sw_context->qs0;
             fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
             
             if (ez->n_cigar > 0) {
@@ -661,8 +661,8 @@ void* sw_result_thread(void* arg)
                 int32_t qe = sw_context->qe;
 
                 rs = sw_context->rs;
-                qs = sw_context->rs;
-                qs0 = sw_context->rs;
+                qs = sw_context->qs;
+                qs0 = sw_context->qs0;
                 fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
                 if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0)
@@ -672,7 +672,7 @@ void* sw_result_thread(void* arg)
                 if (ez->zdropped) { // truncated by Z-drop; TODO: sometimes Z-drop kicks in because the next seed placement is wrong. This can be fixed in principle.
                     for (j = i - 1; j >= 0; --j)
                         if ((int32_t)a[as1 + j].x <= rs + ez->max_t){
-                            fprintf(stderr, "1.break\n");
+                            fprintf(stderr, "1.break, j=%d, a[as1 + j].x=%d, rs=%d, ez->max_t=%d, ez->zdropped=%d\n", j, a[as1 + j].x, rs, ez->max_t, ez->zdropped);
                             break;
                         }
                     dropped = 1;
@@ -706,8 +706,8 @@ void* sw_result_thread(void* arg)
                 int32_t qe0 = sw_context->qe0;
 
                 rs = sw_context->rs;
-                qs = sw_context->rs;
-                qs0 = sw_context->rs;
+                qs = sw_context->qs;
+                qs0 = sw_context->qs0;
                 fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
                 if (ez->n_cigar > 0) {
