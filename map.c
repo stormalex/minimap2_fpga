@@ -612,7 +612,7 @@ void* sw_result_thread(void* arg)
 
         mm_reg1_t *r = &(context->regs0[chain_context->i]);
         mm_reg1_t *regs = context->regs0;
-        
+
         //取出read上下文
         const mm_idx_t *mi = context->mi;
         void* km = context->b->km;
@@ -732,7 +732,7 @@ void* sw_result_thread(void* arg)
                 qe1 = qe + (ez->reach_end? qe0 - qe : ez->max_q + 1);
             }
         }
-        
+
         assert(qe1 <= qlen);
         r->rs = rs1, r->re = re1;
         if (rev) r->qs = qlen - qe1, r->qe = qlen - qs1;
@@ -745,7 +745,7 @@ void* sw_result_thread(void* arg)
             if (rev && r->p->trans_strand)
                 r->p->trans_strand ^= 3; // flip to the read strand
         }
-        
+
         if(r2.cnt > 0) {   //此时这条read需要重新做sw
             fprintf(stderr, "1.insert chain\n");
             params->read_flag[read_index] = 1;
@@ -763,5 +763,6 @@ void* sw_result_thread(void* arg)
             kfree(km, tmp_ez.cigar);
 		}
         //销毁结果数组和所有上下文
+
     }
 }

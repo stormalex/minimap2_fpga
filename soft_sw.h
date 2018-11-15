@@ -10,11 +10,14 @@
 
 typedef struct {
     //原始数据
+    mm_reg1_t *regs0_ori;       //开辟空间保存原始的regs，用完后需要释放
+    mm128_t *a_ori;             //开辟空间保存原始的a，用完后需要释放
+
     int n_regs0;
-    mm_reg1_t *regs0;       //开辟空间保存原始的regs，用完后需要释放
+    mm_reg1_t *regs0;
     int32_t n_a;
-    mm128_t *a;             //开辟空间保存原始的a，用完后需要释放
-    
+    mm128_t *a;
+
     int i;  //表示第几条chain
    
     //align_regs context
@@ -28,8 +31,8 @@ typedef struct {
     uint8_t* tseq;
 
     int rep_len;
-    int *n_regs;
-    mm_reg1_t **regs;
+    int *n_regs;        //存放结果
+    mm_reg1_t **regs;   //存放结果
 
     int8_t mat[25];
     mm_reg1_t *r;

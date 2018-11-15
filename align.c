@@ -844,18 +844,20 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
 		qseq0[1][qlen - 1 - i] = qseq0[0][i] < 4? 3 - qseq0[0][i] : 4;
 	}
 
-	// align through seed hits
+    // align through seed hits
 	n_a = mm_squeeze_a(km, n_regs, regs, a);
-    
+
     //保存regs和a的原始数据
-    context->regs0 = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
-    memcpy(context->regs0, regs, n_regs * sizeof(mm_reg1_t));
-    context->a = (mm128_t*)malloc(n_a * sizeof(mm128_t));
-    memcpy(context->a, a, n_a * sizeof(mm128_t));
+    context->regs0_ori = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
+    memcpy(context->regs0_ori, regs, n_regs * sizeof(mm_reg1_t));
+    context->regs0 = regs;
+    context->a_ori = (mm128_t*)malloc(n_a * sizeof(mm128_t));
+    memcpy(context->a_ori, a, n_a * sizeof(mm128_t));
+    context->a = a;
     context->n_regs0 = n_regs;
     context->n_a = n_a;
     context->read_index = read_index;
-    
+
 	//memset(&ez, 0, sizeof(ksw_extz_t));
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;
