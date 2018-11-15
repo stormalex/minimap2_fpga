@@ -261,6 +261,18 @@ static void align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int
 	return;
 }
 
+static mm_reg1_t *align_regs_ori(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int qlen, const char *seq, int *n_regs, mm_reg1_t *regs, int n_a, mm128_t *a)
+{
+	if (!(opt->flag & MM_F_CIGAR)) return regs;
+	regs = mm_align_skeleton_ori(km, opt, mi, qlen, seq, n_regs, regs, n_a, a); // this calls mm_filter_regs()
+	if (!(opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
+		mm_set_parent(km, opt->mask_level, *n_regs, regs, opt->a * 2 + opt->b);
+		mm_select_sub(km, opt->pri_ratio, mi->k*2, opt->best_n, n_regs, regs);
+		mm_set_sam_pri(*n_regs, regs);
+	}
+	return regs;
+}
+
 void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long read_index)
 {
 	int i, j, rep_len, qlen_sum, n_regs0, n_mini_pos;
@@ -351,7 +363,8 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
         context->b = b;
         context->opt = opt;
         context->qlen = qlens[0];
-        context->seq = seqs[0];
+        context->seq = (char*)malloc(qlens[0]);
+        memcpy(context->seq, seqs[0], qlens[0]);
         //context->n_regs0 = n_regs0;
         //context->regs0 = regs0;
         //context->a = a;
@@ -609,6 +622,7 @@ void* sw_result_thread(void* arg)
         int32_t rs1, qs1, re1, qe1;
         int32_t dropped = 0;
         mm_reg1_t r2;
+        int redo = 0;
 
         mm_reg1_t *r = &(context->regs0[chain_context->i]);
         mm_reg1_t *regs = context->regs0;
@@ -625,7 +639,9 @@ void* sw_result_thread(void* arg)
         int32_t rs = chain_context->rs;
         int32_t qs = chain_context->qs;
         int32_t qs0 = chain_context->qs0;
-        
+
+        int is_sr = !!(opt->flag & MM_F_SR);
+
         long read_index = context->read_index;
         if(params->read_flag[read_index] == 1) {  //这个read后面的chain就不能做了，这条read的所有chain都需要重做
             //TODO 这条read的regs和a需要抛弃
@@ -749,7 +765,7 @@ void* sw_result_thread(void* arg)
         if(r2.cnt > 0) {   //此时这条read需要重新做sw
             fprintf(stderr, "1.insert chain\n");
             params->read_flag[read_index] = 1;
-            //regs = mm_insert_reg(&r2, i, &n_regs, regs);
+            redo = 1;
         }
         if (chain_context->i > 0 && regs[chain_context->i].split_inv) {
             ksw_extz_t tmp_ez;
@@ -757,11 +773,21 @@ void* sw_result_thread(void* arg)
                 //此时这条read需要重新做sw
                 fprintf(stderr, "2.insert chain\n");
                 params->read_flag[read_index] = 1;
-				//regs = mm_insert_reg(&r2, i, &n_regs, regs);
-				//++i; // skip the inserted INV alignment
-			}
+                redo = 1;
+            }
             kfree(km, tmp_ez.cigar);
 		}
+        if(redo == 1) {
+            redo = 0;
+            int n_regs0;
+            context->regs0_ori = align_regs_ori(opt, mi, km, qlen, context->seq, &n_regs0, context->regs0_ori, context->n_a, context->a_ori);
+            mm_set_mapq(km, n_regs0, context->regs0_ori, opt->min_chain_score, opt->a, context->rep_len, is_sr);
+            *(context->n_regs) = n_regs0;
+            context->regs[0] = context->regs0_ori;
+
+            //释放该read所有上下文内容
+        }
+        
         //销毁结果数组和所有上下文
 
     }

@@ -25,7 +25,7 @@ typedef struct {
     const mm_idx_t *mi;
     const mm_mapopt_t *opt;
     int qlen;
-    const char* seq;
+    char* seq;
     long read_index;
 
     uint8_t* tseq;
