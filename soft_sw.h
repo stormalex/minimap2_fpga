@@ -192,4 +192,6 @@ void add_chain_context(context_t* context, chain_context_t* chain_context);
 //向一个chain上下文添加一个sw上下文
 void add_sw_context(chain_context_t* chain_context, sw_context_t* sw_context);
 
+//销毁一个chain及其所有sw的上下文
+void destroy_chain_context(chain_context_t* chain_context);
 #endif //__SOFT_SW_H__

@@ -8,6 +8,8 @@
 
 #include "soft_sw.h"
 
+extern int* chain_num;
+
 static void ksw_gen_simple_mat(int m, int8_t *mat, int8_t a, int8_t b)
 {
 	int i, j;
@@ -862,6 +864,7 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
     context->read_index = read_index;
 
 	//memset(&ez, 0, sizeof(ksw_extz_t));
+    chain_num[read_index] = n_regs;
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;
         chain_context_t* chain_context = create_chain_context();
@@ -1149,8 +1152,8 @@ mm_reg1_t * mm_align_skeleton_ori(void *km, const mm_mapopt_t *opt, const mm_idx
 			mm_reg1_t s[2], s2[2];
 			int which, trans_strand;
 			s[0] = s[1] = regs[i];
-			mm_align1_ori(km, opt, mi, qlen, qseq0, &s[0], &s2[0], n_a, a, NULL, MM_F_SPLICE_FOR);
-			mm_align1_ori(km, opt, mi, qlen, qseq0, &s[1], &s2[1], n_a, a, NULL, MM_F_SPLICE_REV);
+			mm_align1_ori(km, opt, mi, qlen, qseq0, &s[0], &s2[0], n_a, a, &ez, MM_F_SPLICE_FOR);
+			mm_align1_ori(km, opt, mi, qlen, qseq0, &s[1], &s2[1], n_a, a, &ez, MM_F_SPLICE_REV);
 			if (s[0].p->dp_score > s[1].p->dp_score) which = 0, trans_strand = 1;
 			else if (s[0].p->dp_score < s[1].p->dp_score) which = 1, trans_strand = 2;
 			else trans_strand = 3, which = (qlen + s[0].p->dp_score) & 1; // randomly choose a strand, effectively
@@ -1163,7 +1166,7 @@ mm_reg1_t * mm_align_skeleton_ori(void *km, const mm_mapopt_t *opt, const mm_idx
 			}
 			regs[i].p->trans_strand = trans_strand;
 		} else { // one round of alignment
-			mm_align1_ori(km, opt, mi, qlen, qseq0, &regs[i], &r2, n_a, a, NULL, opt->flag);
+			mm_align1_ori(km, opt, mi, qlen, qseq0, &regs[i], &r2, n_a, a, &ez, opt->flag);
 			if (opt->flag&MM_F_SPLICE)
 				regs[i].p->trans_strand = opt->flag&MM_F_SPLICE_FOR? 1 : 2;
 		}

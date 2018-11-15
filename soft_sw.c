@@ -352,6 +352,26 @@ void add_sw_context(chain_context_t* chain_context, sw_context_t* sw_context)
     }
 }
 
+void destroy_sw_context(sw_context_t* sw_context)
+{
+    if(sw_context != NULL)
+        free(sw_context);
+}
+
+void destroy_chain_context(chain_context_t* chain_context)
+{
+    if(chain_context != NULL) {
+        int i = 0;
+        for(i = 0; i < chain_context->sw_num; i++) {
+            destroy_sw_context(chain_context->sw_contexts[i]);
+        }
+        if(chain_context->tseq)
+            free(chain_context->tseq);
+        if(chain_context->qseq0[0])
+            free(chain_context->qseq0[0]);
+    }
+}
+
 void stop_sw_thread()
 {
     sw_stop_flag = 0;

@@ -11,6 +11,7 @@
 #include "khash.h"
 
 static context_t** read_contexts = NULL;     //记录每条read的上下文指针
+int* chain_num = NULL;   //记录每条read有多少条chain
 
 void* sw_result_thread(void* arg);
 
@@ -524,6 +525,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
         read_contexts = (context_t**)malloc(params.read_num * sizeof(context_t*));
         memset(read_contexts, 0, params.read_num * sizeof(context_t*));
 
+        chain_num = (int*)malloc(params.read_num * sizeof(int));
+        memset(chain_num, 0, params.read_num * sizeof(int));
+
         //TODO 处理结果的线程
         pthread_t sw_tid;
         pthread_create(&sw_tid, NULL, sw_result_thread, &params);
@@ -691,7 +695,7 @@ void* sw_result_thread(void* arg)
                 ksw_extz_t* ez = result->ezs[k];
                 sw_context_t* sw_context = sw_contexts[k];
                 uint32_t i = sw_context->i;
-                uint32_t j = 0;
+                int j = 0;
                 uint8_t* qseq = sw_context->query;
                 uint8_t* tseq = sw_context->target;
                 int32_t cnt1 = sw_context->cnt1;
@@ -795,13 +799,33 @@ void* sw_result_thread(void* arg)
             int n_regs0 = context->n_regs0;
             context->regs0_ori = align_regs_ori(opt, mi, km, qlen, context->seq, &n_regs0, context->regs0_ori, context->n_a, context->a_ori);
             mm_set_mapq(km, n_regs0, context->regs0_ori, opt->min_chain_score, opt->a, context->rep_len, is_sr);
-            *(context->n_regs) = n_regs0;
-            context->regs[0] = context->regs0_ori;
-
+            *(context->n_regs) = n_regs0;           //保存结果
+            context->regs[0] = context->regs0_ori;  //保存结果
+            params->read_num--;
+            fprintf(stderr, "2.%ld read done, shengyude read %ld\n", read_index, params->read_num);
             //释放该read所有上下文内容
         }
-        
+        else {  //判断是否整条read做完的
+            chain_num[read_index]--;
+            params->read_num--;
+            fprintf(stderr, "1.%ld read done, shengyude read %ld\n", read_index, params->read_num);
+            if(chain_num[read_index] == 0 && params->read_flag[read_index] == 0) {
+                mm_filter_regs(km, opt, qlen, &context->n_regs0, regs);
+                mm_hit_sort_by_dp(km, &context->n_regs0, regs);
+                if (!(opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
+                    mm_set_parent(km, opt->mask_level, context->n_regs0, regs, opt->a * 2 + opt->b);
+                    mm_select_sub(km, opt->pri_ratio, mi->k*2, opt->best_n, &context->n_regs0, regs);
+                    mm_set_sam_pri(context->n_regs0, regs);
+                }
+                mm_set_mapq(km, context->n_regs0, regs, opt->min_chain_score, opt->a, context->rep_len, is_sr);
+                *(context->n_regs) = context->n_regs0;           //保存结果
+                context->regs[0] = regs;  //保存结果
+            }
+        }
+        fprintf(stderr, "destroy result\n");
+        destroy_results(result);
         //销毁结果数组和所有上下文
-
+        fprintf(stderr, "destroy chain context\n");
+        destroy_chain_context(chain_context);
     }
 }
