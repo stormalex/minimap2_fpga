@@ -10,6 +10,8 @@
 #include "bseq.h"
 #include "khash.h"
 
+static context_t** read_contexts = NULL;     //记录每条read的上下文指针
+
 void* sw_result_thread(void* arg);
 
 struct mm_tbuf_s {
@@ -273,6 +275,7 @@ static mm_reg1_t *align_regs_ori(const mm_mapopt_t *opt, const mm_idx_t *mi, voi
 	return regs;
 }
 
+
 void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long read_index)
 {
 	int i, j, rep_len, qlen_sum, n_regs0, n_mini_pos;
@@ -358,16 +361,19 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	kfree(b->km, mini_pos);
 
 	if (n_segs == 1) { // uni-segment
-        //保存上下文
-        context_t* context = (context_t*)malloc(sizeof(context_t));
+        //创建read上下文并保存在全局数组中
+        if(read_contexts[read_index] != NULL) {
+            fprintf(stderr, "%ld read context is not NULL\n", read_index);
+            exit(1);
+        }
+        context_t* context = create_context(read_index);
+        read_contexts[read_index] = context;
         context->b = b;
         context->opt = opt;
+        context->mi = mi;
         context->qlen = qlens[0];
         context->seq = (char*)malloc(qlens[0]);
         memcpy(context->seq, seqs[0], qlens[0]);
-        //context->n_regs0 = n_regs0;
-        //context->regs0 = regs0;
-        //context->a = a;
         context->read_index = read_index;
         context->rep_len = rep_len;
         context->n_regs = n_regs;
@@ -515,6 +521,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
         params.read_flag = (char*)malloc(params.read_num);
         memset(params.read_flag, 0, params.read_num);
 
+        read_contexts = (context_t**)malloc(params.read_num * sizeof(context_t*));
+        memset(read_contexts, 0, params.read_num * sizeof(context_t*));
+
         //TODO 处理结果的线程
         pthread_t sw_tid;
         pthread_create(&sw_tid, NULL, sw_result_thread, &params);
@@ -617,8 +626,13 @@ void* sw_result_thread(void* arg)
         sw_result_t* result = get_result();
         if(result == NULL)
             continue;
-        context_t* context = result->context;
-        chain_context_t* chain_context = result->chain_context;
+        long read_index = result->read_id;
+        int chain_id = result->chain_id;
+
+        context_t* context = read_contexts[read_index];
+        chain_context_t* chain_context = context->chain_contexts[chain_id];
+        sw_context_t** sw_contexts = chain_context->sw_contexts;
+
         int32_t rs1, qs1, re1, qe1;
         int32_t dropped = 0;
         mm_reg1_t r2;
@@ -642,17 +656,16 @@ void* sw_result_thread(void* arg)
 
         int is_sr = !!(opt->flag & MM_F_SR);
 
-        long read_index = context->read_index;
         if(params->read_flag[read_index] == 1) {  //这个read后面的chain就不能做了，这条read的所有chain都需要重做
             //TODO 这条read的regs和a需要抛弃
             continue;
         }
         
 		fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", context->n_regs0, chain_context->i, read_index);
-        if(result->sw_contexts[0]->pos_flag == 0) {  //left
+        if(sw_contexts[0]->pos_flag == 0) {  //left
             k = 1;  //有左扩展
             ksw_extz_t* ez = result->ezs[0];
-            sw_context_t* sw_context = result->sw_contexts[0];
+            sw_context_t* sw_context = sw_contexts[0];
             rs = sw_context->rs;
             qs = sw_context->qs;
             qs0 = sw_context->qs0;
@@ -673,10 +686,10 @@ void* sw_result_thread(void* arg)
         assert(qs1 >= 0 && rs1 >= 0);
 
         for(; k < result->result_num; k++) {    //gap
-            if(result->sw_contexts[k]->pos_flag == 1) {
+            if(sw_contexts[k]->pos_flag == 1) {
                 int zdrop_code;
                 ksw_extz_t* ez = result->ezs[k];
-                sw_context_t* sw_context = result->sw_contexts[k];
+                sw_context_t* sw_context = sw_contexts[k];
                 uint32_t i = sw_context->i;
                 uint32_t j = 0;
                 uint8_t* qseq = sw_context->query;
@@ -719,18 +732,18 @@ void* sw_result_thread(void* arg)
                 } else r->p->dp_score += ez->score;
                 rs = re, qs = qe;
             }
-            else if(result->sw_contexts[k]->pos_flag == 2) {     //right
+            else if(sw_contexts[k]->pos_flag == 2) {     //right
                 break;
             }
             else {
-                fprintf(stderr, "error position flag(%d), read_index:%ld\n", result->sw_contexts[k]->pos_flag, context->read_index);
+                fprintf(stderr, "error position flag(%d), read_index:%ld\n", sw_contexts[k]->pos_flag, context->read_index);
             }
         }
 
-        if(result->sw_contexts[k]->pos_flag == 2) {      //right
+        if(sw_contexts[k]->pos_flag == 2) {      //right
             if(!dropped) {
                 ksw_extz_t* ez = result->ezs[k];
-                sw_context_t* sw_context = result->sw_contexts[k];
+                sw_context_t* sw_context = sw_contexts[k];
                 int32_t re = sw_context->re;
                 int32_t qe = sw_context->qe;
                 int32_t qe0 = sw_context->qe0;
@@ -779,7 +792,7 @@ void* sw_result_thread(void* arg)
 		}
         if(redo == 1) {
             redo = 0;
-            int n_regs0;
+            int n_regs0 = context->n_regs0;
             context->regs0_ori = align_regs_ori(opt, mi, km, qlen, context->seq, &n_regs0, context->regs0_ori, context->n_a, context->a_ori);
             mm_set_mapq(km, n_regs0, context->regs0_ori, opt->min_chain_score, opt->a, context->rep_len, is_sr);
             *(context->n_regs) = n_regs0;

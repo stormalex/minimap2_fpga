@@ -8,6 +8,9 @@
 #define CHAIN_TASK_NUM     4096    //保存chain任务的数量
 #define CHAIN_RESULT_NUM     4096    //保存chain结果的数量
 
+typedef struct _sw_context_t sw_context_t;
+typedef struct _chain_context_t chain_context_t;
+
 typedef struct {
     //原始数据
     mm_reg1_t *regs0_ori;       //开辟空间保存原始的regs，用完后需要释放
@@ -26,7 +29,6 @@ typedef struct {
     const mm_mapopt_t *opt;
     int qlen;
     char* seq;
-    long read_index;
 
     uint8_t* tseq;
 
@@ -40,9 +42,16 @@ typedef struct {
     int32_t rev;
     
     uint8_t *qseq0;     //结果处理完要释放
+
+    long read_index;                    //read编号
+    int chain_num;
+    int chain_size;
+    chain_context_t** chain_contexts;    //保存该read下每条chain的上下文
 }context_t;
 
-typedef struct {
+typedef struct _chain_context_t{
+    context_t* context;
+
     int32_t i;
     int32_t rs;
     int32_t qs;
@@ -54,9 +63,14 @@ typedef struct {
     
     int32_t re0;
     int32_t rs0;
+
+    int sw_num;
+    int sw_size;
+    sw_context_t** sw_contexts;     //保存该chain下每条sw的上下文
 }chain_context_t;
 
 typedef struct {
+
     int qlen;
     const uint8_t* query;     //指向sw上下文的query
     int tlen;
@@ -73,7 +87,9 @@ typedef struct {
     char position;   //0-left 1-middle 2-right
 }sw_task_t;
 
-typedef struct {
+typedef struct _sw_context_t{
+    chain_context_t *chain_context;
+
     //保存做sw的现场
     int qlen;
     uint8_t* query;
@@ -102,21 +118,21 @@ typedef struct {
 }sw_context_t;
 
 typedef struct {
-    context_t* context;
+    long read_id;
+    int chain_id;
+
     int sw_num;
     int sw_size;
     sw_task_t** sw_tasks;
-    sw_context_t** sw_contexts;
-    chain_context_t* chain_context;
 }chain_sw_task_t;
 
 typedef struct {
-    context_t* context;
+    long read_id;
+    int chain_id;
+
     int result_num;
     int result_size;
     ksw_extz_t** ezs;
-    sw_context_t** sw_contexts;
-    chain_context_t* chain_context;
 }sw_result_t;
 
 
@@ -144,10 +160,10 @@ sw_task_t* create_sw_task(int qlen,
 void destroy_sw_task(sw_task_t* sw_task);
 
 //创建一个chain的sw任务对象
-chain_sw_task_t* create_chain_sw_task(context_t* context, chain_context_t* chain_context);
+chain_sw_task_t* create_chain_sw_task(long read_id, int chain_id);
 
 //向这个chain的sw任务对象中添加一个sw的任务
-void add_sw_task(chain_sw_task_t* chain_sw_task, sw_task_t* sw_task, sw_context_t* sw_context);
+void add_sw_task(chain_sw_task_t* chain_sw_task, sw_task_t* sw_task);
 
 //销毁一个chain的sw任务对象，包括它里面存储的所有sw的任务
 void destroy_chain_sw_task(chain_sw_task_t* chain_sw_task);
@@ -166,4 +182,14 @@ void* sw_thread(void* arg);
 
 //停止sw处理线程
 void stop_sw_thread();
+
+//创建一个read的上下文
+context_t* create_context(long id);
+//创建一个chain的上下文
+chain_context_t* create_chain_context();
+//向一个read上下文添加一个chain上下文
+void add_chain_context(context_t* context, chain_context_t* chain_context);
+//向一个chain上下文添加一个sw上下文
+void add_sw_context(chain_context_t* chain_context, sw_context_t* sw_context);
+
 #endif //__SOFT_SW_H__

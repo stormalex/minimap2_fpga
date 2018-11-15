@@ -422,7 +422,7 @@ static void mm_fix_bad_ends_splice(void *km, const mm_mapopt_t *opt, const mm_id
 	}
 }
 
-static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], mm_reg1_t *r, mm_reg1_t *r2, int n_a, mm128_t *a, ksw_extz_t *ez, int splice_flag, long read_index, context_t* context, chain_context_t* chain_context)
+static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], mm_reg1_t *r, mm_reg1_t *r2, int n_a, mm128_t *a, ksw_extz_t *ez, int splice_flag, long read_index, int chain_index, context_t* context, chain_context_t* chain_context)
 {
 	int is_sr = !!(opt->flag & MM_F_SR), is_splice = !!(opt->flag & MM_F_SPLICE);
 	int32_t rid = a[r->as].x<<1>>33, rev = a[r->as].x>>63, as1, cnt1;
@@ -544,11 +544,10 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	tseq = (uint8_t*)kmalloc(km, re0 - rs0);
 
     //创建一个chain的sw任务
-    chain_sw_task_t* chain_task = create_chain_sw_task(context, chain_context);
+    chain_sw_task_t* chain_task = create_chain_sw_task(read_index, chain_index);
     context->tseq = tseq;
     context->rev = rev;
     memcpy(context->mat, mat, sizeof(context->mat));
-	context->mi = mi;
 
     chain_context->rs = rs;
     chain_context->qs = qs;
@@ -564,6 +563,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		mm_seq_rev(rs - rs0, tseq);
 
         sw_context = (sw_context_t*)malloc(sizeof(sw_context_t));
+        add_sw_context(chain_context, sw_context);
         //TODO 保存上下文
         sw_context->rs = rs;
         sw_context->qs = qs;
@@ -589,7 +589,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                         0);
         
 
-        add_sw_task(chain_task, sw_task, sw_context);
+        add_sw_task(chain_task, sw_task);
 		/*mm_align_pair(km, opt, qs - qs0, qseq, rs - rs0, tseq, mat, bw, opt->end_bonus, r->split_inv? opt->zdrop_inv : opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, ez);
         if (ez->n_cigar > 0) {
 			mm_append_cigar(r, ez->n_cigar, ez->cigar);
@@ -614,7 +614,8 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		} else mm_adjust_minier(mi, qseq0, &a[as1 + i], &re, &qe);
 		re1 = re, qe1 = qe;
 		if (i == cnt1 - 1 || (a[as1+i].y&MM_SEED_LONG_JOIN) || (qe - qs >= opt->min_ksw_len && re - rs >= opt->min_ksw_len)) {
-			int j, bw1 = bw, zdrop_code;
+			//int j, bw1 = bw, zdrop_code;
+            int j, bw1 = bw;
 			if (a[as1+i].y & MM_SEED_LONG_JOIN)
 				bw1 = qe - qs > re - rs? qe - qs : re - rs;
 			// perform alignment
@@ -632,6 +633,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                 //fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", qe - qs, re - rs, bw1);
 				
                 sw_context = (sw_context_t*)malloc(sizeof(sw_context_t));
+                add_sw_context(chain_context, sw_context);
                 //TODO 保存上下文
                 sw_context->i = i;
                 sw_context->pos_flag = 1;
@@ -662,7 +664,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                         -1, extra_flag|KSW_EZ_APPROX_MAX, 
                         1);
 
-                add_sw_task(chain_task, sw_task, sw_context);
+                add_sw_task(chain_task, sw_task);
                 //mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
             }
 			// test Z-drop and inversion Z-drop
@@ -699,6 +701,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         //fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", qe0 - qe, re0 - re, bw);
         
         sw_context = (sw_context_t*)malloc(sizeof(sw_context_t));
+        add_sw_context(chain_context, sw_context);
         //TODO 保存上下文
         sw_context->w = bw;
         sw_context->pos_flag = 2;
@@ -727,7 +730,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                         opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY, 
                         2);
 
-        add_sw_task(chain_task, sw_task, sw_context);
+        add_sw_task(chain_task, sw_task);
 		/*mm_align_pair(km, opt, qe0 - qe, qseq, re0 - re, tseq, mat, bw, opt->end_bonus, opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY, ez);
 		if (ez->n_cigar > 0) {
 			mm_append_cigar(r, ez->n_cigar, ez->cigar);
@@ -861,7 +864,8 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
 	//memset(&ez, 0, sizeof(ksw_extz_t));
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;
-        chain_context_t* chain_context = (chain_context_t*)malloc(sizeof(chain_context_t));
+        chain_context_t* chain_context = create_chain_context();
+        add_chain_context(context, chain_context);
         chain_context->i = i;
 
         //fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", n_regs, i, read_index);
@@ -883,7 +887,7 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
 			}
 			regs[i].p->trans_strand = trans_strand;*/
 		} else { // one round of alignment
-			mm_align1(km, opt, mi, qlen, qseq0, &regs[i], &r2, n_a, a, NULL, opt->flag, read_index, context, chain_context);
+			mm_align1(km, opt, mi, qlen, qseq0, &regs[i], &r2, n_a, a, NULL, opt->flag, read_index, i, context, chain_context);
 			if (opt->flag&MM_F_SPLICE)
 				regs[i].p->trans_strand = opt->flag&MM_F_SPLICE_FOR? 1 : 2;
 		}

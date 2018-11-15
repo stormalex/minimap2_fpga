@@ -216,16 +216,15 @@ void destroy_sw_task(sw_task_t* sw_task)
     return;
 }
 
-chain_sw_task_t* create_chain_sw_task(context_t* context, chain_context_t* chain_context)
+chain_sw_task_t* create_chain_sw_task(long read_id, int chain_id)
 {
     chain_sw_task_t* new_chain_sw_task = (chain_sw_task_t *)malloc(sizeof(chain_sw_task_t));
     if(new_chain_sw_task != NULL) {
-        new_chain_sw_task->context = context;
-        new_chain_sw_task->chain_context = chain_context;
+        new_chain_sw_task->read_id = read_id;
+        new_chain_sw_task->chain_id = chain_id;
         new_chain_sw_task->sw_num = 0;
         new_chain_sw_task->sw_size = 32;
         new_chain_sw_task->sw_tasks = (sw_task_t**)malloc(new_chain_sw_task->sw_size * sizeof(sw_task_t*));
-        new_chain_sw_task->sw_contexts = (sw_context_t**)malloc(new_chain_sw_task->sw_size * sizeof(sw_context_t*));
     }
     return new_chain_sw_task;
 }
@@ -243,19 +242,17 @@ void destroy_chain_sw_task(chain_sw_task_t* chain_sw_task)
     return;
 }
 
-void add_sw_task(chain_sw_task_t* chain_sw_task, sw_task_t* sw_task, sw_context_t* sw_context)
+void add_sw_task(chain_sw_task_t* chain_sw_task, sw_task_t* sw_task)
 {
-    if(chain_sw_task != NULL && sw_task != NULL && sw_context != NULL) {
+    if(chain_sw_task != NULL && sw_task != NULL) {
         if(chain_sw_task->sw_size == 0)
             chain_sw_task->sw_size = 32;
         else if(chain_sw_task->sw_size == chain_sw_task->sw_num) {
             chain_sw_task->sw_size = chain_sw_task->sw_size*2;
             //fprintf(stderr, "chain_sw_task(%p)->sw_size=%d\n", chain_sw_task, chain_sw_task->sw_size);
             chain_sw_task->sw_tasks = (sw_task_t**)realloc(chain_sw_task->sw_tasks, chain_sw_task->sw_size * sizeof(sw_task_t*));
-            chain_sw_task->sw_contexts = (sw_context_t**)realloc(chain_sw_task->sw_contexts, chain_sw_task->sw_size * sizeof(sw_context_t*));
         }
         chain_sw_task->sw_tasks[chain_sw_task->sw_num] = sw_task;
-        chain_sw_task->sw_contexts[chain_sw_task->sw_num] = sw_context;
         chain_sw_task->sw_num++;
     }
     return;
@@ -302,6 +299,59 @@ void destroy_results(sw_result_t* result)
     return;
 }
 
+context_t* create_context(long id)
+{
+    context_t* context = (context_t *)malloc(sizeof(context_t));
+    if(context != NULL) {
+        context->read_index = id;
+        context->chain_num = 0;
+        context->chain_size = 16;
+        context->chain_contexts = (chain_context_t**)malloc(context->chain_size * sizeof(chain_context_t*));
+    }
+    return context;
+}
+
+void add_chain_context(context_t* context, chain_context_t* chain_context)
+{
+    if(context != NULL && chain_context != NULL) {
+        if(context->chain_size == 0)
+            context->chain_size = 32;
+        else if(context->chain_size == context->chain_num) {
+            context->chain_size = context->chain_size*2;
+            context->chain_contexts = (chain_context_t**)realloc(context->chain_contexts, context->chain_size * sizeof(chain_context_t*));
+        }
+        context->chain_contexts[context->chain_num] = chain_context;
+        context->chain_num++;
+        chain_context->context = context;   //指向了这个read的上下文
+    }
+}
+
+chain_context_t* create_chain_context()
+{
+    chain_context_t* chain_context = (chain_context_t *)malloc(sizeof(chain_context_t));
+    if(chain_context != NULL) {
+        chain_context->sw_num = 0;
+        chain_context->sw_size = 16;
+        chain_context->sw_contexts = (sw_context_t**)malloc(chain_context->sw_size * sizeof(sw_context_t*));
+    }
+    return chain_context;
+}
+
+void add_sw_context(chain_context_t* chain_context, sw_context_t* sw_context)
+{
+    if(chain_context != NULL && sw_context != NULL) {
+        if(chain_context->sw_size == 0)
+            chain_context->sw_size = 32;
+        else if(chain_context->sw_size == chain_context->sw_num) {
+            chain_context->sw_size = chain_context->sw_size*2;
+            chain_context->sw_contexts = (sw_context_t**)realloc(chain_context->sw_contexts, chain_context->sw_size * sizeof(sw_context_t*));
+        }
+        chain_context->sw_contexts[chain_context->sw_num] = sw_context;
+        chain_context->sw_num++;
+        sw_context->chain_context = chain_context;   //指向了这个chain的上下文
+    }
+}
+
 void stop_sw_thread()
 {
     sw_stop_flag = 0;
@@ -329,9 +379,9 @@ void* sw_thread(void* arg)
 
             add_result(result, ez);
         }
-        result->context = chain_tasks->context;
-        result->sw_contexts = chain_tasks->sw_contexts;
-        result->chain_context = chain_tasks->chain_context;
+        result->read_id = chain_tasks->read_id;
+        result->chain_id = chain_tasks->chain_id;
+
         destroy_chain_sw_task(chain_tasks);
         while(send_result(result));
     }
