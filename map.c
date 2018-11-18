@@ -12,6 +12,10 @@
 
 static context_t** read_contexts = NULL;     //记录每条read的上下文指针
 int* chain_num = NULL;   //记录每条read有多少条chain
+long process_read = 0;
+long zero_seed_num = 0;     //seed为0的read数量
+char* read_flag = NULL;
+char* read_is_complete = NULL;  //记录一条read有没有处理完成
 
 void* sw_result_thread(void* arg);
 
@@ -518,21 +522,41 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		} else free(s);
     } else if (step == 1) { // step 1: map
         sw_result_params_t params;
+        process_read = 0;
+        zero_seed_num = 0;
         params.read_num = ((step_t*)in)->n_frag;
-        params.read_flag = (char*)malloc(params.read_num);
-        memset(params.read_flag, 0, params.read_num);
 
+        //TODO 这里还需要清理残留的结果及结果的上下文数据
+        init_result_array();
+
+        //params.read_flag = (char*)malloc(params.read_num);
+        //memset(params.read_flag, 0, params.read_num);
+        read_flag = (char*)malloc(params.read_num);
+        memset(read_flag, 0, params.read_num);
+
+        fprintf(stderr, "read_num=%ld\n", params.read_num);
         read_contexts = (context_t**)malloc(params.read_num * sizeof(context_t*));
         memset(read_contexts, 0, params.read_num * sizeof(context_t*));
 
         chain_num = (int*)malloc(params.read_num * sizeof(int));
         memset(chain_num, 0, params.read_num * sizeof(int));
 
+        read_is_complete = (char*)malloc(params.read_num);
+        memset(read_is_complete, 0, params.read_num);
+
+        if(result_empty() == 0) {
+            fprintf(stderr, "result is empty\n");
+        }
+        else {
+            fprintf(stderr, "result is not empty, have %d results\n", result_empty());
+        }
         //TODO 处理结果的线程
         pthread_t sw_tid;
         pthread_create(&sw_tid, NULL, sw_result_thread, &params);
 
 		kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
+
+        pthread_join(sw_tid, NULL);
 
         if(params.read_num == 0) {
             fprintf(stderr, "%ld read ok!\n", params.read_num);
@@ -540,8 +564,17 @@ static void *worker_pipeline(void *shared, int step, void *in)
         else {
             fprintf(stderr, "%ld read do not process!\n", params.read_num);
         }
-        pthread_join(sw_tid, NULL);
-        while(params.read_num);
+        
+        if(params.read_num == zero_seed_num) {
+            fprintf(stderr, "read process complete\n");
+        }
+        else {
+            fprintf(stderr, "read process do not complete\n");
+        }
+        free(read_is_complete);read_is_complete = NULL;
+        free(read_contexts);read_contexts = NULL;
+        free(chain_num);chain_num = NULL;
+        free(read_flag);read_flag = NULL;
 		return in;
     } else if (step == 2) { // step 2: output
 		void *km = 0;
@@ -625,6 +658,7 @@ int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int
 void* sw_result_thread(void* arg)
 {
     sw_result_params_t *params = (sw_result_params_t*)arg;
+    long _read_num = params->read_num;
     int k = 0;
     while(1) {
         sw_result_t* result = get_result();
@@ -660,12 +694,16 @@ void* sw_result_thread(void* arg)
 
         int is_sr = !!(opt->flag & MM_F_SR);
 
-        if(params->read_flag[read_index] == 1) {  //这个read后面的chain就不能做了，这条read的所有chain都需要重做
+        /*if(params->read_flag[read_index] == 1) {  //这个read后面的chain就不能做了，这条read的所有chain都需要重做
+            //TODO 这条read的regs和a需要抛弃
+            continue;
+        }*/
+        if(read_flag[read_index] == 1) {  //这个read后面的chain就不能做了，这条read的所有chain都需要重做
             //TODO 这条read的regs和a需要抛弃
             continue;
         }
         
-		fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", context->n_regs0, chain_context->i, read_index);
+		//fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", context->n_regs0, chain_context->i, read_index);
         if(sw_contexts[0]->pos_flag == 0) {  //left
             k = 1;  //有左扩展
             ksw_extz_t* ez = result->ezs[0];
@@ -673,7 +711,7 @@ void* sw_result_thread(void* arg)
             rs = sw_context->rs;
             qs = sw_context->qs;
             qs0 = sw_context->qs0;
-            fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
+            //fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
             
             if (ez->n_cigar > 0) {
                 mm_append_cigar(r, ez->n_cigar, ez->cigar);
@@ -706,7 +744,7 @@ void* sw_result_thread(void* arg)
                 rs = sw_context->rs;
                 qs = sw_context->qs;
                 qs0 = sw_context->qs0;
-                fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
+                //fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
                 if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0) {
                     mm_align_pair(km, opt, sw_context->qlen, qseq, sw_context->tlen, tseq, mat, sw_context->w, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, sw_context->zdrop_flag, ez); // second pass: lift approximate
@@ -715,9 +753,9 @@ void* sw_result_thread(void* arg)
                     mm_append_cigar(r, ez->n_cigar, ez->cigar);
                 if (ez->zdropped) { // truncated by Z-drop; TODO: sometimes Z-drop kicks in because the next seed placement is wrong. This can be fixed in principle.
                     for (j = i - 1; j >= 0; --j) {
-                        fprintf(stderr, "a=%p as1=%d j=%d a[as1 + j].x=%d rs=%d rs+ez->max_t=%d\n", a, as1, j, (int32_t)a[as1 + j].x, rs, rs + ez->max_t);
+                        //fprintf(stderr, "a=%p as1=%d j=%d a[as1 + j].x=%d rs=%d rs+ez->max_t=%d\n", a, as1, j, (int32_t)a[as1 + j].x, rs, rs + ez->max_t);
                         if ((int32_t)a[as1 + j].x <= rs + ez->max_t){
-                            fprintf(stderr, "1.break\n");
+                            //fprintf(stderr, "1.break\n");
                             break;
                         }
                     }
@@ -731,7 +769,7 @@ void* sw_result_thread(void* arg)
                         mm_split_reg(r, &r2, as1 + j + 1 - r->as, qlen, a);
                         if (zdrop_code == 2) r2.split_inv = 1;
                     }
-                    fprintf(stderr, "2.break\n");
+                    //fprintf(stderr, "2.break\n");
                     break;
                 } else r->p->dp_score += ez->score;
                 rs = re, qs = qe;
@@ -755,7 +793,7 @@ void* sw_result_thread(void* arg)
                 rs = sw_context->rs;
                 qs = sw_context->qs;
                 qs0 = sw_context->qs0;
-                fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
+                //fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
                 if (ez->n_cigar > 0) {
                     mm_append_cigar(r, ez->n_cigar, ez->cigar);
@@ -780,16 +818,18 @@ void* sw_result_thread(void* arg)
         }
 
         if(r2.cnt > 0) {   //此时这条read需要重新做sw
-            fprintf(stderr, "1.insert chain\n");
-            params->read_flag[read_index] = 1;
+            //fprintf(stderr, "1.insert chain\n");
+            //params->read_flag[read_index] = 1;
+            read_flag[read_index] = 1;
             redo = 1;
         }
         if (chain_context->i > 0 && regs[chain_context->i].split_inv) {
             ksw_extz_t tmp_ez;
 			if (mm_align1_inv(km, opt, mi, qlen, chain_context->qseq0, &regs[chain_context->i-1], &regs[chain_context->i], &r2, &tmp_ez)) {
                 //此时这条read需要重新做sw
-                fprintf(stderr, "2.insert chain\n");
-                params->read_flag[read_index] = 1;
+                //fprintf(stderr, "2.insert chain\n");
+                //params->read_flag[read_index] = 1;
+                read_flag[read_index] = 1;
                 redo = 1;
             }
             kfree(km, tmp_ez.cigar);
@@ -802,14 +842,15 @@ void* sw_result_thread(void* arg)
             *(context->n_regs) = n_regs0;           //保存结果
             context->regs[0] = context->regs0_ori;  //保存结果
             params->read_num--;
-            fprintf(stderr, "2.%ld read done, shengyude read %ld\n", read_index, params->read_num);
+            read_is_complete[read_index] = 1;
+            //fprintf(stderr, "2.%ld read done, shengyude read %ld\n", read_index, params->read_num);
             //释放该read所有上下文内容
         }
         else {  //判断是否整条read做完的
             chain_num[read_index]--;
-            params->read_num--;
-            fprintf(stderr, "1.%ld read done, shengyude read %ld\n", read_index, params->read_num);
-            if(chain_num[read_index] == 0 && params->read_flag[read_index] == 0) {
+            //fprintf(stderr, "1.%ld read done, shengyude read %ld\n", read_index, params->read_num);
+            //if(chain_num[read_index] == 0 && params->read_flag[read_index] == 0) {
+            if(chain_num[read_index] == 0 && read_flag[read_index] == 0) {
                 mm_filter_regs(km, opt, qlen, &context->n_regs0, regs);
                 mm_hit_sort_by_dp(km, &context->n_regs0, regs);
                 if (!(opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
@@ -820,12 +861,21 @@ void* sw_result_thread(void* arg)
                 mm_set_mapq(km, context->n_regs0, regs, opt->min_chain_score, opt->a, context->rep_len, is_sr);
                 *(context->n_regs) = context->n_regs0;           //保存结果
                 context->regs[0] = regs;  //保存结果
+
+                params->read_num--;
+                read_is_complete[read_index] = 1;
             }
         }
-        fprintf(stderr, "destroy result\n");
+        //fprintf(stderr, "destroy result\n");
         destroy_results(result);
         //销毁结果数组和所有上下文
-        fprintf(stderr, "destroy chain context\n");
+        //fprintf(stderr, "destroy chain context process_read=%ld, zero_seed_num=%ld, params->read_num=%ld\n", process_read, zero_seed_num, params->read_num);
         destroy_chain_context(chain_context);
+
+        if(zero_seed_num == params->read_num) {
+            fprintf(stderr, "sw result thread exit, zero_seed_num=%ld read num=%ld\n", zero_seed_num, _read_num);
+            return NULL;
+        }
     }
+    return NULL;
 }

@@ -9,6 +9,9 @@
 #include "soft_sw.h"
 
 extern int* chain_num;
+extern long zero_seed_num;
+long process_read;
+extern char* read_flag;
 
 static void ksw_gen_simple_mat(int m, int8_t *mat, int8_t a, int8_t b)
 {
@@ -865,6 +868,10 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
 
 	//memset(&ez, 0, sizeof(ksw_extz_t));
     chain_num[read_index] = n_regs;
+    if(n_regs == 0)
+        zero_seed_num++;
+    else
+        process_read++;
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;
         chain_context_t* chain_context = create_chain_context();

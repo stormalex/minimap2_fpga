@@ -120,12 +120,14 @@ sw_result_t* results_array[CHAIN_RESULT_NUM];
 pthread_mutex_t results_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int results_head = 0;
 static int results_tail = 0;
+static int result_num = 0;
 
 void init_result_array()
 {
     memset(results_array, 0, sizeof(results_array));
     results_head = 0;
     results_tail = 0;
+    result_num = 0;
     return;
 }
 
@@ -148,6 +150,7 @@ int send_result(sw_result_t* results)
     }
     
     results_array[results_tail] = results;
+    result_num++;
     //fprintf(stderr, "result insert to %d\n", results_tail);
     results_tail = (results_tail + 1) % CHAIN_RESULT_NUM;
         
@@ -166,11 +169,24 @@ sw_result_t* get_result()
         return NULL;
     }
     tmp = results_array[results_head];
+    results_array[results_head] = NULL;
+    result_num--;
     results_head = (results_head + 1) % CHAIN_RESULT_NUM;
     
     pthread_mutex_unlock(&results_mutex);
     
     return tmp;
+}
+
+int result_empty()
+{
+    pthread_mutex_lock(&results_mutex);
+    if (result_is_empty()) {
+        pthread_mutex_unlock(&results_mutex);
+        return 0;
+    }
+    pthread_mutex_unlock(&results_mutex);
+    return result_num;
 }
 
 sw_task_t* create_sw_task(int qlen,
