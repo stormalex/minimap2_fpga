@@ -72,9 +72,9 @@ typedef struct _chain_context_t{
 typedef struct {
 
     int qlen;
-    const uint8_t* query;     //指向sw上下文的query
+    uint8_t* query;     //开辟空间保存，用完后需释放
     int tlen;
-    const uint8_t* target;    //指向sw上下文的target
+    uint8_t* target;    //开辟空间保存，用完后需释放
     int8_t mat[25];
     int8_t q;
     int8_t e;

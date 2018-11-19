@@ -207,9 +207,11 @@ sw_task_t* create_sw_task(int qlen,
     sw_task_t* new_task = (sw_task_t*)malloc(sizeof(sw_task_t));
     if(new_task != NULL) {
         new_task->qlen = qlen;
-        new_task->query = query;
+        new_task->query = (uint8_t*)malloc(qlen * sizeof(uint8_t));
+        memcpy(new_task->query, query, qlen * sizeof(uint8_t));
         new_task->tlen = tlen;
-        new_task->target = target;
+        new_task->target = (uint8_t*)malloc(tlen * sizeof(uint8_t));
+        memcpy(new_task->target, target, tlen * sizeof(uint8_t));
         memcpy(new_task->mat, mat, sizeof(new_task->mat));
         new_task->q = q;
         new_task->e = e;
@@ -227,6 +229,10 @@ sw_task_t* create_sw_task(int qlen,
 void destroy_sw_task(sw_task_t* sw_task)
 {
     if(sw_task != NULL) {
+        if(sw_task->query)
+            free(sw_task->query);
+        if(sw_task->target)
+            free(sw_task->target);
         free(sw_task);
     }
     return;
