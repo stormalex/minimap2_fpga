@@ -149,6 +149,17 @@ typedef struct {
 // memory buffer for thread-local storage during mapping
 typedef struct mm_tbuf_s mm_tbuf_t;
 
+#include "soft_sw.h"
+typedef struct {
+    long read_num;
+    unsigned long zero_seed_num;        //seed为0的read数量
+    int* chain_num;                     //记录每条read有多少条chain
+    char* read_flag;                    //记录该条read是需要加chain的read，软件来做，其他的结果忽略
+    char* read_is_complete;             //记录一条read有没有处理完成
+    context_t** read_contexts;          //记录每条read的上下文指针
+    sw_result_t*** read_results;         //数组里的每一个元素记录一个read的所有chain的结果
+}user_params_t;
+
 // global variables
 extern int mm_verbose, mm_dbg_flag; // verbose level: 0 for no info, 1 for error, 2 for warning, 3 for message (default); debugging flag
 extern double mm_realtime0; // wall-clock timer
@@ -284,7 +295,7 @@ void mm_tbuf_destroy(mm_tbuf_t *b);
  */
 mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *name);
 
-void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long i);
+void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long i, user_params_t* params);
 
 /**
  * Align a fasta/fastq file and print alignments to stdout

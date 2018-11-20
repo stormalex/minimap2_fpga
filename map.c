@@ -10,12 +10,6 @@
 #include "bseq.h"
 #include "khash.h"
 
-static context_t** read_contexts = NULL;     //记录每条read的上下文指针
-int* chain_num = NULL;   //记录每条read有多少条chain
-long process_read = 0;
-long zero_seed_num = 0;     //seed为0的read数量
-char* read_flag = NULL;
-char* read_is_complete = NULL;  //记录一条read有没有处理完成
 
 void* sw_result_thread(void* arg);
 
@@ -256,10 +250,10 @@ static void chain_post(const mm_mapopt_t *opt, int max_chain_gap_ref, const mm_i
 	}
 }
 
-static void align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int qlen, const char *seq, int *n_regs, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context)
+static void align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int qlen, const char *seq, int *n_regs, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context, user_params_t* params)
 {
 	if (!(opt->flag & MM_F_CIGAR)) return;
-	mm_align_skeleton(km, opt, mi, qlen, seq, n_regs, regs, a, read_index, context); // this calls mm_filter_regs()
+	mm_align_skeleton(km, opt, mi, qlen, seq, n_regs, regs, a, read_index, context, params); // this calls mm_filter_regs()
 	/*if (!(opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
 		mm_set_parent(km, opt->mask_level, *n_regs, regs, opt->a * 2 + opt->b);
 		mm_select_sub(km, opt->pri_ratio, mi->k*2, opt->best_n, n_regs, regs);
@@ -281,7 +275,7 @@ static mm_reg1_t *align_regs_ori(const mm_mapopt_t *opt, const mm_idx_t *mi, voi
 }
 
 
-void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long read_index)
+void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long read_index, user_params_t* params)
 {
 	int i, j, rep_len, qlen_sum, n_regs0, n_mini_pos;
 	int max_chain_gap_qry, max_chain_gap_ref, is_splice = !!(opt->flag & MM_F_SPLICE), is_sr = !!(opt->flag & MM_F_SR);
@@ -367,12 +361,12 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	if (n_segs == 1) { // uni-segment
         //创建read上下文并保存在全局数组中
-        if(read_contexts[read_index] != NULL) {
+        if(params->read_contexts[read_index] != NULL) {
             fprintf(stderr, "%ld read context is not NULL\n", read_index);
             exit(1);
         }
         context_t* context = create_context(read_index);
-        read_contexts[read_index] = context;
+        params->read_contexts[read_index] = context;
         context->b = b;
         context->opt = opt;
         context->mi = mi;
@@ -384,7 +378,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
         context->n_regs = n_regs;
         context->regs = regs;
 
-		align_regs(opt, mi, b->km, qlens[0], seqs[0], &n_regs0, regs0, a, read_index, context);
+		align_regs(opt, mi, b->km, qlens[0], seqs[0], &n_regs0, regs0, a, read_index, context, params);
 		//mm_set_mapq(b->km, n_regs0, regs0, opt->min_chain_score, opt->a, rep_len, is_sr);
 		//n_regs[0] = n_regs0, regs[0] = regs0;
 	} else { // multi-segment
@@ -422,7 +416,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 mm_reg1_t *mm_map(const mm_idx_t *mi, int qlen, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname)
 {
 	mm_reg1_t *regs;
-	mm_map_frag(mi, 1, &qlen, &seq, n_regs, &regs, b, opt, qname, -1);
+	mm_map_frag(mi, 1, &qlen, &seq, n_regs, &regs, b, opt, qname, -1, NULL);
 	return regs;
 }
 
@@ -447,12 +441,13 @@ typedef struct {
 	mm_tbuf_t **buf;
 } step_t;
 
-static void worker_for(void *_data, long i, int tid) // kt_for() callback
+static void worker_for(void *_data, long i, int tid, void* params) // kt_for() callback
 {
     step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];
 	mm_tbuf_t *b = s->buf[tid];
+    user_params_t* user_params = (user_params_t*)params;
 	assert(s->n_seg[i] <= MM_MAX_SEG);
 	if (mm_dbg_flag & MM_DBG_PRINT_QNAME)
 		fprintf(stderr, "QR\t%s\t%d\t%d\n", s->seq[off].name, tid, s->seq[off].l_seq);
@@ -464,9 +459,9 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	}
 	if (s->p->opt->flag & MM_F_INDEPEND_SEG) {
 		for (j = 0; j < s->n_seg[i]; ++j)
-			mm_map_frag(s->p->mi, 1, &qlens[j], &qseqs[j], &s->n_reg[off+j], &s->reg[off+j], b, s->p->opt, s->seq[off+j].name, i);
+			mm_map_frag(s->p->mi, 1, &qlens[j], &qseqs[j], &s->n_reg[off+j], &s->reg[off+j], b, s->p->opt, s->seq[off+j].name, i, user_params);
 	} else {
-		mm_map_frag(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name, i);
+		mm_map_frag(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name, i, user_params);
 	}
 
     //这些代码目前不会进入
@@ -483,11 +478,6 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 			}
 		}*/
 }
-
-typedef struct {
-    char* read_flag;
-    long read_num;
-}sw_result_params_t;
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
@@ -521,28 +511,26 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
-        sw_result_params_t params;
-        process_read = 0;
-        zero_seed_num = 0;
+        user_params_t params;
+        memset(&params, 0, sizeof(params));
+
         params.read_num = ((step_t*)in)->n_frag;
 
-        //TODO 这里还需要清理残留的结果及结果的上下文数据
-        init_result_array();
-
-        //params.read_flag = (char*)malloc(params.read_num);
-        //memset(params.read_flag, 0, params.read_num);
-        read_flag = (char*)malloc(params.read_num);
-        memset(read_flag, 0, params.read_num);
+        params.read_flag = (char*)malloc(params.read_num);
+        memset(params.read_flag, 0, params.read_num);
 
         fprintf(stderr, "read_num=%ld\n", params.read_num);
-        read_contexts = (context_t**)malloc(params.read_num * sizeof(context_t*));
-        memset(read_contexts, 0, params.read_num * sizeof(context_t*));
+        params.read_contexts = (context_t**)malloc(params.read_num * sizeof(context_t*));
+        memset(params.read_contexts, 0, params.read_num * sizeof(context_t*));
 
-        chain_num = (int*)malloc(params.read_num * sizeof(int));
-        memset(chain_num, 0, params.read_num * sizeof(int));
+        params.chain_num = (int*)malloc(params.read_num * sizeof(int));
+        memset(params.chain_num, 0, params.read_num * sizeof(int));
 
-        read_is_complete = (char*)malloc(params.read_num);
-        memset(read_is_complete, 0, params.read_num);
+        params.read_is_complete = (char*)malloc(params.read_num);
+        memset(params.read_is_complete, 0, params.read_num);
+
+        params.read_results = (sw_result_t***)malloc(params.read_num * sizeof(sw_result_t**));
+        memset(params.read_results, 0, params.read_num * sizeof(sw_result_t**));
 
         if(result_empty() == 0) {
             fprintf(stderr, "result is empty\n");
@@ -550,11 +538,14 @@ static void *worker_pipeline(void *shared, int step, void *in)
         else {
             fprintf(stderr, "result is not empty, have %d results\n", result_empty());
         }
+        //TODO 这里还需要清理残留的结果及结果的上下文数据
+        init_result_array();
+
         //TODO 处理结果的线程
         pthread_t sw_tid;
         pthread_create(&sw_tid, NULL, sw_result_thread, &params);
 
-		kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
+		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params);
 
         pthread_join(sw_tid, NULL);
 
@@ -565,16 +556,17 @@ static void *worker_pipeline(void *shared, int step, void *in)
             fprintf(stderr, "%ld read do not process!\n", params.read_num);
         }
         
-        if(params.read_num == zero_seed_num) {
+        if(params.read_num == params.zero_seed_num) {
             fprintf(stderr, "read process complete\n");
         }
         else {
             fprintf(stderr, "read process do not complete\n");
         }
-        free(read_is_complete);read_is_complete = NULL;
-        free(read_contexts);read_contexts = NULL;
-        free(chain_num);chain_num = NULL;
-        free(read_flag);read_flag = NULL;
+        free(params.read_results);
+        free(params.read_is_complete);
+        free(params.read_contexts);
+        free(params.chain_num);
+        free(params.read_flag);
 		return in;
     } else if (step == 2) { // step 2: output
 		void *km = 0;
@@ -657,7 +649,7 @@ int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int
 
 void* sw_result_thread(void* arg)
 {
-    sw_result_params_t *params = (sw_result_params_t*)arg;
+    user_params_t *params = (user_params_t*)arg;
     long _read_num = params->read_num;
     int k = 0;
     while(1) {
@@ -667,7 +659,7 @@ void* sw_result_thread(void* arg)
         long read_index = result->read_id;
         int chain_id = result->chain_id;
 
-        context_t* context = read_contexts[read_index];
+        context_t* context = params->read_contexts[read_index];
         chain_context_t* chain_context = context->chain_contexts[chain_id];
         sw_context_t** sw_contexts = chain_context->sw_contexts;
 
@@ -694,11 +686,7 @@ void* sw_result_thread(void* arg)
 
         int is_sr = !!(opt->flag & MM_F_SR);
 
-        /*if(params->read_flag[read_index] == 1) {  //这个read后面的chain就不能做了，这条read的所有chain都需要重做
-            //TODO 这条read的regs和a需要抛弃
-            continue;
-        }*/
-        if(read_flag[read_index] == 1) {  //这个read后面的chain就不能做了，这条read的所有chain都需要重做
+        if(params->read_flag[read_index] == 1) {  //这个read后面的chain就不能做了，这条read的所有chain都需要重做
             //TODO 这条read的regs和a需要抛弃
             continue;
         }
@@ -819,8 +807,7 @@ void* sw_result_thread(void* arg)
 
         if(r2.cnt > 0) {   //此时这条read需要重新做sw
             //fprintf(stderr, "1.insert chain\n");
-            //params->read_flag[read_index] = 1;
-            read_flag[read_index] = 1;
+            params->read_flag[read_index] = 1;
             redo = 1;
         }
         if (chain_context->i > 0 && regs[chain_context->i].split_inv) {
@@ -828,8 +815,7 @@ void* sw_result_thread(void* arg)
 			if (mm_align1_inv(km, opt, mi, qlen, chain_context->qseq0, &regs[chain_context->i-1], &regs[chain_context->i], &r2, &tmp_ez)) {
                 //此时这条read需要重新做sw
                 //fprintf(stderr, "2.insert chain\n");
-                //params->read_flag[read_index] = 1;
-                read_flag[read_index] = 1;
+                params->read_flag[read_index] = 1;
                 redo = 1;
             }
             kfree(km, tmp_ez.cigar);
@@ -842,15 +828,14 @@ void* sw_result_thread(void* arg)
             *(context->n_regs) = n_regs0;           //保存结果
             context->regs[0] = context->regs0_ori;  //保存结果
             params->read_num--;
-            read_is_complete[read_index] = 1;
+            params->read_is_complete[read_index] = 1;
             //fprintf(stderr, "2.%ld read done, shengyude read %ld\n", read_index, params->read_num);
             //释放该read所有上下文内容
         }
         else {  //判断是否整条read做完的
-            chain_num[read_index]--;
+            params->chain_num[read_index]--;
             //fprintf(stderr, "1.%ld read done, shengyude read %ld\n", read_index, params->read_num);
-            //if(chain_num[read_index] == 0 && params->read_flag[read_index] == 0) {
-            if(chain_num[read_index] == 0 && read_flag[read_index] == 0) {
+            if(params->chain_num[read_index] == 0 && params->read_flag[read_index] == 0) {
                 mm_filter_regs(km, opt, qlen, &context->n_regs0, regs);
                 mm_hit_sort_by_dp(km, &context->n_regs0, regs);
                 if (!(opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
@@ -863,17 +848,15 @@ void* sw_result_thread(void* arg)
                 context->regs[0] = regs;  //保存结果
 
                 params->read_num--;
-                read_is_complete[read_index] = 1;
+                params->read_is_complete[read_index] = 1;
             }
         }
-        //fprintf(stderr, "destroy result\n");
         destroy_results(result);
         //销毁结果数组和所有上下文
-        //fprintf(stderr, "destroy chain context process_read=%ld, zero_seed_num=%ld, params->read_num=%ld\n", process_read, zero_seed_num, params->read_num);
         destroy_chain_context(chain_context);
 
-        if(zero_seed_num == params->read_num) {
-            fprintf(stderr, "sw result thread exit, zero_seed_num=%ld read num=%ld\n", zero_seed_num, _read_num);
+        if(params->zero_seed_num == params->read_num) {
+            fprintf(stderr, "sw result thread exit, zero_seed_num=%ld read num=%ld\n", params->zero_seed_num, _read_num);
             return NULL;
         }
     }

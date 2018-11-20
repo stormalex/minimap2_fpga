@@ -8,11 +8,6 @@
 
 #include "soft_sw.h"
 
-extern int* chain_num;
-extern long zero_seed_num;
-long process_read;
-extern char* read_flag;
-
 static void ksw_gen_simple_mat(int m, int8_t *mat, int8_t a, int8_t b)
 {
 	int i, j;
@@ -838,7 +833,7 @@ static inline mm_reg1_t *mm_insert_reg(const mm_reg1_t *r, int i, int *n_regs, m
 	return regs;
 }
 
-void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, const char *qstr, int *n_regs_, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context)
+void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, const char *qstr, int *n_regs_, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context, user_params_t* params)
 {
 	extern unsigned char seq_nt4_table[256];
 	int32_t i, n_regs = *n_regs_, n_a;
@@ -868,11 +863,10 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
     context->read_index = read_index;
 
 	//memset(&ez, 0, sizeof(ksw_extz_t));
-    chain_num[read_index] = n_regs;
+    params->chain_num[read_index] = n_regs;
     if(n_regs == 0)
-        zero_seed_num++;
-    else
-        process_read++;
+        __sync_fetch_and_add(&params->zero_seed_num, 1);
+
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;
         chain_context_t* chain_context = create_chain_context();

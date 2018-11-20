@@ -11,7 +11,7 @@
 typedef struct _sw_context_t sw_context_t;
 typedef struct _chain_context_t chain_context_t;
 
-typedef struct {
+typedef struct _context_t{
     //原始数据
     mm_reg1_t *regs0_ori;       //开辟空间保存原始的regs，用完后需要释放
     mm128_t *a_ori;             //开辟空间保存原始的a，用完后需要释放
