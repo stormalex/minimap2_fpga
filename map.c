@@ -685,12 +685,12 @@ void* sw_result_thread(void* arg)
         const mm_mapopt_t *opt = context->opt;
         mm128_t *a = context->a;
         int qlen = context->qlen;
-        int32_t rev = context->rev;
         int8_t* mat = context->mat;
         
         int32_t rs = chain_context->rs;
         int32_t qs = chain_context->qs;
         int32_t qs0 = chain_context->qs0;
+        int32_t rev = chain_context->rev;
 
         int is_sr = !!(opt->flag & MM_F_SR);
 

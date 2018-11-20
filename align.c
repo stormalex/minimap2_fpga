@@ -551,13 +551,14 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
     //创建一个chain的sw任务
     chain_sw_task_t* chain_task = create_chain_sw_task(read_index, chain_index);
     context->tseq = tseq;
-    context->rev = rev;
+
     memcpy(context->mat, mat, sizeof(context->mat));
 
     chain_context->rs = rs;
     chain_context->qs = qs;
     chain_context->qs0 = qs0;
     chain_context->rid = rid;
+    chain_context->rev = rev;
 
     sw_task_t* sw_task = NULL;
     sw_context_t* sw_context = NULL;

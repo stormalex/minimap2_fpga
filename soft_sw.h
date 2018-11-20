@@ -38,8 +38,6 @@ typedef struct {
 
     int8_t mat[25];
     mm_reg1_t *r;
-
-    int32_t rev;
     
     uint8_t *qseq0;     //结果处理完要释放
 
@@ -63,6 +61,8 @@ typedef struct _chain_context_t{
     
     int32_t re0;
     int32_t rs0;
+
+    int32_t rev;
 
     int sw_num;
     int sw_size;
