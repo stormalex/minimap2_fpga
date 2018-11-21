@@ -725,7 +725,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         sw_context->zdrop = opt->zdrop;
         sw_context->flag = extra_flag|KSW_EZ_EXTZ_ONLY;
 
-        sw_task = create_sw_task(qe0 - qe, qseq, re0 - re, tseq,
+        sw_task = create_sw_task(qe0 - qe, sw_context->query, re0 - re, sw_context->target,
                         mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
                         opt->zdrop,
                         opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY, 

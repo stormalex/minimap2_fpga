@@ -72,9 +72,9 @@ typedef struct _chain_context_t{
 typedef struct {
 
     int qlen;
-    uint8_t* query;     //开辟空间保存，用完后需释放
+    uint8_t* query;     //指向sw上下文的query
     int tlen;
-    uint8_t* target;    //开辟空间保存，用完后需释放
+    uint8_t* target;    //指向sw上下文的target
     int8_t mat[25];
     int8_t q;
     int8_t e;
@@ -145,9 +145,9 @@ sw_result_t* get_result();
 
 //创建一个sw任务
 sw_task_t* create_sw_task(int qlen,
-                        const uint8_t* query,
+                        uint8_t* query,
                         int tlen,
-                        const uint8_t* target,
+                        uint8_t* target,
                         const int8_t* mat,
                         int q,
                         int e,
