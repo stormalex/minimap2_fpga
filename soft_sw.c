@@ -402,8 +402,6 @@ void stop_sw_thread()
 void* sw_thread(void* arg)
 {
     int i = 0;
-    init_task_array();
-    init_result_array();
     
     while(sw_stop_flag)
     {

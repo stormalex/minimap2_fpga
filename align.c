@@ -864,8 +864,14 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
 
 	//memset(&ez, 0, sizeof(ksw_extz_t));
     params->chain_num[read_index] = n_regs;
-    if(n_regs == 0)
-        __sync_fetch_and_add(&params->zero_seed_num, 1);
+    params->read_results[read_index].chain_result_num = 0;
+    params->read_results[read_index].chain_results = (sw_result_t**)malloc(n_regs * sizeof(sw_result_t*));
+    memset(params->read_results[read_index].chain_results, 0, n_regs * sizeof(sw_result_t*));
+    if(n_regs == 0) {
+        params->read_is_complete[read_index] = 1;
+        __sync_add_and_fetch(&params->zero_seed_num, 1);
+        __sync_sub_and_fetch(&params->read_num, 1);
+    }
 
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;

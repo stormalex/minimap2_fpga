@@ -95,6 +95,10 @@ static inline void yes_or_no(mm_mapopt_t *opt, int flag, int long_idx, const cha
 	}
 }
 
+void init_task_array();
+void init_result_array();
+void stop_sw_thread();
+
 int main(int argc, char *argv[])
 {
 	const char *opt_str = "2aSDw:k:K:t:r:f:Vv:g:G:I:d:XT:s:x:Hcp:M:n:z:A:B:O:E:m:N:Qu:R:hF:LC:y";
@@ -313,8 +317,14 @@ int main(int argc, char *argv[])
 	if (opt.best_n == 0 && (opt.flag&MM_F_CIGAR) && mm_verbose >= 2)
 		fprintf(stderr, "[WARNING]\033[1;31m `-N 0' reduces alignment accuracy. Please use --secondary=no to suppress secondary alignments.\033[0m\n");
 
-    pthread_t sw_tid;
-    pthread_create(&sw_tid, NULL, sw_thread, NULL);
+    init_task_array();
+    init_result_array();
+
+    pthread_t sw_tid[20];
+    int thread_i = 0;
+    for(thread_i = 0; thread_i < 20; thread_i++) {
+        pthread_create(&sw_tid[thread_i], NULL, sw_thread, NULL);
+    }
 
     while ((mi = mm_idx_reader_read(idx_rdr, n_threads)) != 0) {
 		if ((opt.flag & MM_F_CIGAR) && (mi->flag & MM_I_NO_SEQ)) {
@@ -353,7 +363,9 @@ int main(int argc, char *argv[])
 	}
 
     stop_sw_thread();
-    pthread_join(sw_tid, NULL);
+    for(thread_i = 0; thread_i < 20; thread_i++) {
+        pthread_join(sw_tid[thread_i], NULL);
+    }
 
 	if (mm_verbose >= 3) {
 		fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);

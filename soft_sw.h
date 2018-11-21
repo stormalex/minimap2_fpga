@@ -135,6 +135,10 @@ typedef struct {
     ksw_extz_t** ezs;
 }sw_result_t;
 
+typedef struct {
+    unsigned int chain_result_num;
+    sw_result_t** chain_results;
+}read_result_t;
 
 int send_task(chain_sw_task_t* chain_sw_tasks);
 sw_result_t* get_result();

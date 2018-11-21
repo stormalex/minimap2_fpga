@@ -157,7 +157,9 @@ typedef struct {
     char* read_flag;                    //记录该条read是需要加chain的read，软件来做，其他的结果忽略
     char* read_is_complete;             //记录一条read有没有处理完成
     context_t** read_contexts;          //记录每条read的上下文指针
-    sw_result_t*** read_results;         //数组里的每一个元素记录一个read的所有chain的结果
+    read_result_t* read_results;        //数组里的每一个元素记录一个read的所有chain的结果
+
+    int exit;                           //线程退出标志
 }user_params_t;
 
 // global variables
