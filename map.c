@@ -704,6 +704,8 @@ static int save_read_result(read_result_t* read_result, context_t* context, int 
         for(; k < result->result_num; k++) {    //gap
             if(sw_contexts[k]->pos_flag == 1) {
                 int zdrop_code;
+                ksw_extz_t tmp_ez;
+                memset(&tmp_ez, 0, sizeof(tmp_ez));
                 ksw_extz_t* ez = result->ezs[k];
                 sw_context_t* sw_context = sw_contexts[k];
                 uint32_t i = sw_context->i;
@@ -721,7 +723,8 @@ static int save_read_result(read_result_t* read_result, context_t* context, int 
                 //fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
                 if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0) {
-                    mm_align_pair(km, opt, sw_context->qlen, qseq, sw_context->tlen, tseq, mat, sw_context->w, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, sw_context->zdrop_flag, ez); // second pass: lift approximate
+                    mm_align_pair(km, opt, sw_context->qlen, qseq, sw_context->tlen, tseq, mat, sw_context->w, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, sw_context->zdrop_flag, &tmp_ez); // second pass: lift approximate
+                    ez = &tmp_ez;
                 }
                 if (ez->n_cigar > 0)
                     mm_append_cigar(r, ez->n_cigar, ez->cigar);
@@ -729,7 +732,12 @@ static int save_read_result(read_result_t* read_result, context_t* context, int 
                     for (j = i - 1; j >= 0; --j) {
                         //fprintf(stderr, "a=%p as1=%d j=%d a[as1 + j].x=%d rs=%d rs+ez->max_t=%d\n", a, as1, j, (int32_t)a[as1 + j].x, rs, rs + ez->max_t);
                         if ((int32_t)a[as1 + j].x <= rs + ez->max_t){
-                            //fprintf(stderr, "1.break\n");
+                            if(zdrop_code != 0) {
+                                if(tmp_ez.cigar != NULL) {
+                                    kfree(km, tmp_ez.cigar);
+                                    tmp_ez.cigar = NULL;
+                                }
+                            }
                             break;
                         }
                     }
@@ -743,10 +751,22 @@ static int save_read_result(read_result_t* read_result, context_t* context, int 
                         mm_split_reg(r, &r2, as1 + j + 1 - r->as, qlen, a);
                         if (zdrop_code == 2) r2.split_inv = 1;
                     }
-                    //fprintf(stderr, "2.break\n");
+                    if(zdrop_code != 0) {
+                        if(tmp_ez.cigar != NULL) {
+                            kfree(km, tmp_ez.cigar);
+                            tmp_ez.cigar = NULL;
+                        }
+                    }
                     break;
                 } else r->p->dp_score += ez->score;
                 rs = re, qs = qe;
+
+                if(zdrop_code != 0) {
+                    if(tmp_ez.cigar != NULL) {
+                        kfree(km, tmp_ez.cigar);
+                        tmp_ez.cigar = NULL;
+                    }
+                }
             }
             else if(sw_contexts[k]->pos_flag == 2) {     //right
                 break;
@@ -805,6 +825,7 @@ static int save_read_result(read_result_t* read_result, context_t* context, int 
         }
         if (chain_context->i > 0 && regs[chain_context->i].split_inv) {
             ksw_extz_t tmp_ez;
+            memset(&tmp_ez, 0, sizeof(tmp_ez));
             if (mm_align1_inv(km, opt, mi, qlen, chain_context->qseq0, &regs[chain_context->i-1], &regs[chain_context->i], &r2, &tmp_ez)) {
                 //此时这条read需要重新做sw
                 //fprintf(stderr, "2.insert chain\n");
