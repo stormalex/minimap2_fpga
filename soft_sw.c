@@ -236,10 +236,12 @@ chain_sw_task_t* create_chain_sw_task(long read_id, int chain_id)
 {
     chain_sw_task_t* new_chain_sw_task = (chain_sw_task_t *)malloc(sizeof(chain_sw_task_t));
     if(new_chain_sw_task != NULL) {
+        new_chain_sw_task->data_size = 0;
         new_chain_sw_task->read_id = read_id;
         new_chain_sw_task->chain_id = chain_id;
         new_chain_sw_task->sw_num = 0;
         new_chain_sw_task->sw_size = 32;
+        new_chain_sw_task->flag = 0;
         new_chain_sw_task->sw_tasks = (sw_task_t**)malloc(new_chain_sw_task->sw_size * sizeof(sw_task_t*));
     }
     return new_chain_sw_task;
@@ -257,7 +259,7 @@ void destroy_chain_sw_task(chain_sw_task_t* chain_sw_task)
     }
     return;
 }
-
+#define ADDR_ALIGN(addr, align)   (((addr)+align-1)&~( align-1))
 void add_sw_task(chain_sw_task_t* chain_sw_task, sw_task_t* sw_task)
 {
     if(chain_sw_task != NULL && sw_task != NULL) {
@@ -270,6 +272,7 @@ void add_sw_task(chain_sw_task_t* chain_sw_task, sw_task_t* sw_task)
         }
         chain_sw_task->sw_tasks[chain_sw_task->sw_num] = sw_task;
         chain_sw_task->sw_num++;
+        chain_sw_task->data_size += (16 + ADDR_ALIGN(sw_task->qlen, 16) + ADDR_ALIGN(sw_task->tlen, 16));
     }
     return;
 }

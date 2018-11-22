@@ -12,6 +12,7 @@
 
 #include <pthread.h>
 #include "soft_sw.h"
+#include "fpga_sw.h"
 
 #define MM_VERSION "2.10-r761"
 
@@ -317,14 +318,33 @@ int main(int argc, char *argv[])
 	if (opt.best_n == 0 && (opt.flag&MM_F_CIGAR) && mm_verbose >= 2)
 		fprintf(stderr, "[WARNING]\033[1;31m `-N 0' reduces alignment accuracy. Please use --secondary=no to suppress secondary alignments.\033[0m\n");
 
+
+
+    fprintf(stderr, "50 align with 16 is %d\n", ADDR_ALIGN(50, 16));
+    fprintf(stderr, "64 align with 16 is %d\n", ADDR_ALIGN(64, 16));
+    fprintf(stderr, "sizeof(fpga_sw_task)=%ld\n", sizeof(fpga_sw_task));
+    fprintf(stderr, "sizeof(ksw_extz_t)=%ld\n", sizeof(ksw_extz_t));
+    
+    assert(sizeof(fpga_sw_task) == 16);
+    
     init_task_array();
     init_result_array();
 
-    pthread_t sw_tid[20];
+    /*pthread_t sw_tid[20];
     int thread_i = 0;
     for(thread_i = 0; thread_i < 20; thread_i++) {
         pthread_create(&sw_tid[thread_i], NULL, sw_thread, NULL);
+    }*/
+    
+    int ret = fpga_init(BLOCK);
+    if(ret) {
+        printf("fpga_init failed\n");
+        return -1;
     }
+    pthread_t send_tid;
+    pthread_t recv_tid;
+    pthread_create(&send_tid, NULL, send_task_thread, NULL);
+    pthread_create(&recv_tid, NULL, recv_task_thread, NULL);
 
     while ((mi = mm_idx_reader_read(idx_rdr, n_threads)) != 0) {
 		if ((opt.flag & MM_F_CIGAR) && (mi->flag & MM_I_NO_SEQ)) {
@@ -362,10 +382,16 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-    stop_sw_thread();
+    /*stop_sw_thread();
     for(thread_i = 0; thread_i < 20; thread_i++) {
         pthread_join(sw_tid[thread_i], NULL);
-    }
+    }*/
+
+    stop_fpga_thread();
+    fpga_exit_block();
+    pthread_join(send_tid, NULL);
+    pthread_join(recv_tid, NULL);
+    fpga_finalize();
 
 	if (mm_verbose >= 3) {
 		fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);

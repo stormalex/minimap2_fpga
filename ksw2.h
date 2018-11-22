@@ -19,7 +19,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+/*
 typedef struct {
 	uint32_t max:31, zdropped:1;
 	int max_q, max_t;      // max extension coordinate
@@ -28,6 +28,20 @@ typedef struct {
 	int score;             // max score reaching both ends; may be KSW_NEG_INF
 	int m_cigar, n_cigar;
 	int reach_end;
+	uint32_t *cigar;
+} ksw_extz_t;
+*/
+typedef struct {
+    int n_cigar;
+    uint32_t max:31, zdropped:1;
+	int max_q, max_t;      // max extension coordinate
+	int mqe, mqe_t;        // max score when reaching the end of query
+	int mte, mte_q;        // max score when reaching the end of target
+	int score;             // max score reaching both ends; may be KSW_NEG_INF
+    int reach_end;
+	int m_cigar;
+	int revcigar;
+    unsigned char reserve[8];
 	uint32_t *cigar;
 } ksw_extz_t;
 

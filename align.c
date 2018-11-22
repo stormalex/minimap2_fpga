@@ -422,6 +422,13 @@ static void mm_fix_bad_ends_splice(void *km, const mm_mapopt_t *opt, const mm_id
 	}
 }
 
+#define VSCMIN(x,y) ({ \
+  typeof(x) _x = (x);     \
+  typeof(y) _y = (y);     \
+  (void) (&_x == &_y);            \
+  _x < _y ? _x : _y; })
+
+
 static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], mm_reg1_t *r, mm_reg1_t *r2, int n_a, mm128_t *a, ksw_extz_t *ez, int splice_flag, long read_index, int chain_index, context_t* context, chain_context_t* chain_context)
 {
 	int is_sr = !!(opt->flag & MM_F_SR), is_splice = !!(opt->flag & MM_F_SPLICE);
@@ -544,6 +551,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	tseq = (uint8_t*)kmalloc(km, re0 - rs0);
 
     //创建一个chain的sw任务
+    int small;
     chain_sw_task_t* chain_task = create_chain_sw_task(read_index, chain_index);
     context->tseq = tseq;
 
@@ -588,8 +596,12 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                         r->split_inv? opt->zdrop_inv : opt->zdrop,
                         opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
                         0);
-        
 
+        small = VSCMIN(sw_task->qlen, sw_task->tlen);
+        small = VSCMIN(small, sw_task->w);
+        if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
+            chain_task->flag = 1;
+        }
         add_sw_task(chain_task, sw_task);
 		/*mm_align_pair(km, opt, qs - qs0, qseq, rs - rs0, tseq, mat, bw, opt->end_bonus, r->split_inv? opt->zdrop_inv : opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, ez);
         if (ez->n_cigar > 0) {
@@ -664,7 +676,11 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                         opt->zdrop,
                         -1, extra_flag|KSW_EZ_APPROX_MAX, 
                         1);
-
+                small = VSCMIN(sw_task->qlen, sw_task->tlen);
+                small = VSCMIN(small, sw_task->w);
+                if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
+                    chain_task->flag = 1;
+                }
                 add_sw_task(chain_task, sw_task);
                 //mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
             }
@@ -731,6 +747,11 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                         opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY, 
                         2);
 
+        small = VSCMIN(sw_task->qlen, sw_task->tlen);
+        small = VSCMIN(small, sw_task->w);
+        if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
+            chain_task->flag = 1;
+        }
         add_sw_task(chain_task, sw_task);
 		/*mm_align_pair(km, opt, qe0 - qe, qseq, re0 - re, tseq, mat, bw, opt->end_bonus, opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY, ez);
 		if (ez->n_cigar > 0) {
@@ -762,7 +783,28 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		if (rev && r->p->trans_strand)
 			r->p->trans_strand ^= 3; // flip to the read strand
 	}*/
-    while(send_task(chain_task));  //将任务放到任务队列
+    if(chain_task->flag == 1) {
+        fprintf(stderr, "soft process\n");
+        int index = 0;
+        sw_result_t* result = create_result();
+        for(index = 0; index < chain_task->sw_num; index++) {
+            ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
+            memset(ez, 0, sizeof(ksw_extz_t));
+            sw_task_t* task = chain_task->sw_tasks[index];
+            
+            ksw_extd2_sse(NULL, task->qlen, task->query, task->tlen, task->target, 5, task->mat, task->q, task->e, task->q2, task->e2, task->w, task->zdrop, task->end_bonus, task->flag, ez);
+
+            add_result(result, ez);
+        }
+        result->read_id = chain_task->read_id;
+        result->chain_id = chain_task->chain_id;
+
+        destroy_chain_sw_task(chain_task);
+        while(send_result(result));
+    }
+    else {
+        while(send_task(chain_task));  //将任务放到任务队列
+    }
 	kfree(km, tseq);
 }
 

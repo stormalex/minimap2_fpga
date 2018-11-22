@@ -121,9 +121,12 @@ typedef struct {
     long read_id;
     int chain_id;
 
+    int data_size;
+
     int sw_num;
     int sw_size;
     sw_task_t** sw_tasks;
+    int flag;   //0:fpga    1:soft
 }chain_sw_task_t;
 
 typedef struct {
@@ -202,4 +205,7 @@ void destroy_chain_context(chain_context_t* chain_context);
 int result_empty();
 
 void init_result_array();
+
+chain_sw_task_t* get_task();
+int send_result(sw_result_t* results);
 #endif //__SOFT_SW_H__
