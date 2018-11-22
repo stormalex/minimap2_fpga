@@ -17,7 +17,6 @@
 
 #include "fpga_sw.h"
 #include "soft_sw.h"
-#include "list.h"
 
 static int send_thread_flag = 1;
 static chain_sw_task_t* task_array[SEND_ARRAY_SIZE];
