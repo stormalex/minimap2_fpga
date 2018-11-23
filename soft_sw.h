@@ -126,7 +126,7 @@ typedef struct {
     int sw_num;
     int sw_size;
     sw_task_t** sw_tasks;
-    int flag;   //0:fpga    1:soft
+    int flag;   //0:fpga    1:soft  3:最后一个任务
 }chain_sw_task_t;
 
 typedef struct {

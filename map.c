@@ -543,14 +543,14 @@ static void *worker_pipeline(void *shared, int step, void *in)
 
         //TODO 处理结果的线程
         int i = 0;
-        pthread_t sw_tid[20];
-        for(i = 0; i < 20; i++) {
+        pthread_t sw_tid[1];
+        for(i = 0; i < 1; i++) {
             pthread_create(&sw_tid[i], NULL, sw_result_thread, &params);
         }
 
 		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params);
 
-        for(i = 0; i < 20; i++)
+        for(i = 0; i < 1; i++)
             pthread_join(sw_tid[i], NULL);
 
         if(params.read_num == 0) {
@@ -645,7 +645,16 @@ int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int
 	return mm_map_file_frag(idx, 1, &fn, opt, n_threads);
 }
 
-static int save_read_result(read_result_t* read_result, context_t* context, int num, char* read_flag, int* chain_num)
+void reverse_cigar(int n_cigar, uint32_t *cigar)
+{
+    uint32_t tmp;
+    int i = 0;
+    for (i=0; i<n_cigar>>1; i++)
+        tmp = cigar[i],cigar[i]=cigar[n_cigar-1-i],cigar[n_cigar-1-i]=tmp;
+    return;
+}
+
+static int save_read_result(long read_id, read_result_t* read_result, context_t* context, int num, char* read_flag, int* chain_num)
 {
     int ret = 0;
     int k = 0;
@@ -677,6 +686,8 @@ static int save_read_result(read_result_t* read_result, context_t* context, int 
 
         int is_sr = !!(opt->flag & MM_F_SR);
         
+        
+        
         //fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", context->n_regs0, chain_context->i, read_index);
         if(sw_contexts[0]->pos_flag == 0) {  //left
             k = 1;  //有左扩展
@@ -688,6 +699,8 @@ static int save_read_result(read_result_t* read_result, context_t* context, int 
             //fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
             
             if (ez->n_cigar > 0) {
+                if (0xA0B1C2D3 == ez->revcigar)
+                    reverse_cigar(ez->n_cigar, ez->cigar);
                 mm_append_cigar(r, ez->n_cigar, ez->cigar);
                 r->p->dp_score += ez->max;
             }
@@ -721,7 +734,11 @@ static int save_read_result(read_result_t* read_result, context_t* context, int 
                 qs = sw_context->qs;
                 qs0 = sw_context->qs0;
                 //fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
-                
+
+                if (ez->n_cigar > 0)
+                    if (0xA0B1C2D3 == ez->revcigar)
+                        reverse_cigar(ez->n_cigar, ez->cigar);
+
                 if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0) {
                     mm_align_pair(km, opt, sw_context->qlen, qseq, sw_context->tlen, tseq, mat, sw_context->w, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, sw_context->zdrop_flag, &tmp_ez); // second pass: lift approximate
                     ez = &tmp_ez;
@@ -790,6 +807,8 @@ static int save_read_result(read_result_t* read_result, context_t* context, int 
                 //fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
                 if (ez->n_cigar > 0) {
+                    if (0xA0B1C2D3 == ez->revcigar)
+                        reverse_cigar(ez->n_cigar, ez->cigar);
                     mm_append_cigar(r, ez->n_cigar, ez->cigar);
                     r->p->dp_score += ez->max;
                 }
@@ -802,6 +821,7 @@ static int save_read_result(read_result_t* read_result, context_t* context, int 
         r->rs = rs1, r->re = re1;
         if (rev) r->qs = qlen - qe1, r->qe = qlen - qs1;
         else r->qs = qs1, r->qe = qe1;
+        
         
         assert(re1 - rs1 <= chain_context->re0 - chain_context->rs0);
         if (r->p) {
@@ -885,12 +905,12 @@ void* sw_result_thread(void* arg)
         context_t* context = params->read_contexts[read_index];
         //将结果放入对应的位置
         params->read_results[read_index].chain_results[chain_id] = result;
-        unsigned int chain_result_num = __sync_add_and_fetch(&params->read_results[read_index].chain_result_num, 1);
+        unsigned int chain_result_num = __sync_add_and_fetch(&params->read_results[read_index].chain_result_num, 1);    //加1然后返回加1后的结果
 
         //判断整条read的chain的结果都返回
         if(chain_result_num == params->chain_num[read_index]) {
             //处理一条read的结果
-            int ret = save_read_result(&params->read_results[read_index], context, chain_result_num,
+            int ret = save_read_result(read_index, &params->read_results[read_index], context, chain_result_num,
                                        &params->read_flag[read_index], &params->chain_num[read_index]);
             if(ret == 1) {
                 params->read_is_complete[read_index] = 1;

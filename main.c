@@ -322,6 +322,9 @@ int main(int argc, char *argv[])
 
     fprintf(stderr, "50 align with 16 is %d\n", ADDR_ALIGN(50, 16));
     fprintf(stderr, "64 align with 16 is %d\n", ADDR_ALIGN(64, 16));
+    
+    fprintf(stderr, "sizeof(fpga_task_t)=%ld\n", sizeof(fpga_task_t));
+    fprintf(stderr, "sizeof(fpga_task_id_t)=%ld\n", sizeof(fpga_task_id_t));
     fprintf(stderr, "sizeof(fpga_sw_task)=%ld\n", sizeof(fpga_sw_task));
     fprintf(stderr, "sizeof(ksw_extz_t)=%ld\n", sizeof(ksw_extz_t));
     
@@ -336,7 +339,7 @@ int main(int argc, char *argv[])
         pthread_create(&sw_tid[thread_i], NULL, sw_thread, NULL);
     }*/
     
-    int ret = fpga_init(BLOCK);
+    int ret = fpga_init(NOBLOCK);
     if(ret) {
         printf("fpga_init failed\n");
         return -1;

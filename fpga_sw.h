@@ -27,7 +27,8 @@ typedef struct {
     unsigned short zdrop;
     unsigned short bw;
     unsigned char end_bonus;
-    unsigned char reserve[5];
+    unsigned char reserve1;
+    unsigned char reserve2[4];
 }fpga_sw_task;
 
 void* send_task_thread(void* arg);

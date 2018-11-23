@@ -784,7 +784,6 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 			r->p->trans_strand ^= 3; // flip to the read strand
 	}*/
     if(chain_task->flag == 1) {
-        fprintf(stderr, "soft process\n");
         int index = 0;
         sw_result_t* result = create_result();
         for(index = 0; index < chain_task->sw_num; index++) {
