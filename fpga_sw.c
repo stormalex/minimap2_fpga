@@ -78,6 +78,7 @@ void* send_task_thread(void* arg)
             }
 
             head = (fpga_task_t*)fpga_buf;        //指向buff首地址
+            head->check_id = CHECK_ID;
             head->sw_num = 0;
             chain_head = (fpga_task_id_t*)(fpga_buf + sizeof(fpga_task_t));
             sw_task = (fpga_sw_task*)(fpga_buf + 4096);
@@ -160,6 +161,11 @@ void* recv_task_thread(void *arg)
         }
 
         head = (fpga_task_t*)fpga_buf;
+        if(head->check_id != CHECK_ID) {
+            fpga_release_retbuf(fpga_buf);
+            fprintf(stderr, "head->check_id=%x, error buf\n", head->check_id);
+            continue;
+        }
         fprintf(stderr, "recv:tag:%lld, chain num:%d, sw num:%d\n", head->tag, head->chain_task_num, head->sw_num);
         int chain_num = head->chain_task_num;
         chain_head = (fpga_task_id_t*)((char*)fpga_buf + sizeof(fpga_task_t));

@@ -8,8 +8,11 @@
 
 #define ADDR_ALIGN(addr, align)   (((addr)+align-1)&~( align-1))
 
+#define CHECK_ID    0x1234ABCD
+
 typedef struct {
     unsigned long long tag;     //包的标记，可以用来标记唯一一个包
+    int check_id;
     int chain_task_num;         //标记任务中有几个chain
     int sw_num;                 //标记任务中有几个sw任务
 }fpga_task_t;
