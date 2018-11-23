@@ -339,7 +339,7 @@ int main(int argc, char *argv[])
         pthread_create(&sw_tid[thread_i], NULL, sw_thread, NULL);
     }*/
     
-    int ret = fpga_init(NOBLOCK);
+    int ret = fpga_init(BLOCK);
     if(ret) {
         printf("fpga_init failed\n");
         return -1;
