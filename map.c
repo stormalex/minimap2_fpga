@@ -2,6 +2,8 @@
 #include <string.h>
 #include <assert.h>
 #include <pthread.h>
+#include <errno.h>
+
 #include "kthread.h"
 #include "kvec.h"
 #include "kalloc.h"
@@ -479,6 +481,12 @@ static void worker_for(void *_data, long i, int tid, void* params) // kt_for() c
 		}*/
 }
 
+typedef struct {
+    int tid;
+    user_params_t* params;
+}user_args_t;
+static int count = 0;
+static char cmd[100];
 static void *worker_pipeline(void *shared, int step, void *in)
 {
 	int i, j, k;
@@ -532,6 +540,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
         params.read_results = (read_result_t*)malloc(params.read_num * sizeof(read_result_t));
         memset(params.read_results, 0, params.read_num * sizeof(read_result_t));
 
+        int i = 0;
+        
         if(result_empty() == 0) {
             fprintf(stderr, "result is empty\n");
         }
@@ -542,15 +552,17 @@ static void *worker_pipeline(void *shared, int step, void *in)
         init_result_array();
 
         //TODO 处理结果的线程
-        int i = 0;
-        pthread_t sw_tid[1];
-        for(i = 0; i < 1; i++) {
-            pthread_create(&sw_tid[i], NULL, sw_result_thread, &params);
+        user_args_t user_args[10];
+        pthread_t sw_tid[10];
+        for(i = 0; i < 10; i++) {
+            user_args[i].tid = i;
+            user_args[i].params = &params;
+            pthread_create(&sw_tid[i], NULL, sw_result_thread, &user_args[i]);
         }
 
 		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params);
 
-        for(i = 0; i < 1; i++)
+        for(i = 0; i < 10; i++)
             pthread_join(sw_tid[i], NULL);
 
         if(params.read_num == 0) {
@@ -559,7 +571,13 @@ static void *worker_pipeline(void *shared, int step, void *in)
         else {
             fprintf(stderr, "%ld read do not process!\n", params.read_num);
         }
-
+        count++;
+        for(i = 0; i < 10; i++){
+            memset(cmd, 0, sizeof(cmd));
+            sprintf(cmd, "mv result_%d.bin %d_tid%d.bin", i, count, i);
+            system(cmd);
+        }
+        
         free(params.read_results);
         free(params.read_is_complete);
         free(params.read_contexts);
@@ -659,11 +677,14 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
     int ret = 0;
     int k = 0;
     int chain_i = 0;
+    //fprintf(stderr, "read_id=%ld\n", read_id);
     for(chain_i = 0; chain_i < num; chain_i++) {
         chain_context_t* chain_context = context->chain_contexts[chain_i];
         sw_context_t** sw_contexts = chain_context->sw_contexts;
         sw_result_t* result = read_result->chain_results[chain_i];
 
+        int result_num = result->result_num;
+        
         int32_t rs1, qs1, re1, qe1;
         int32_t dropped = 0;
         mm_reg1_t r2;
@@ -690,6 +711,7 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
         
         //fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", context->n_regs0, chain_context->i, read_index);
         if(sw_contexts[0]->pos_flag == 0) {  //left
+            result_num--;
             k = 1;  //有左扩展
             ksw_extz_t* ez = result->ezs[0];
             sw_context_t* sw_context = sw_contexts[0];
@@ -699,8 +721,11 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
             //fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
             
             if (ez->n_cigar > 0) {
-                if (0xA0B1C2D3 == ez->revcigar)
+#if !DUMP_FILE
+                if (0xA0B1C2D3 == ez->revcigar) {
                     reverse_cigar(ez->n_cigar, ez->cigar);
+                }
+#endif
                 mm_append_cigar(r, ez->n_cigar, ez->cigar);
                 r->p->dp_score += ez->max;
             }
@@ -716,6 +741,7 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
 
         for(; k < result->result_num; k++) {    //gap
             if(sw_contexts[k]->pos_flag == 1) {
+                result_num--;
                 int zdrop_code;
                 ksw_extz_t tmp_ez;
                 memset(&tmp_ez, 0, sizeof(tmp_ez));
@@ -735,9 +761,13 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                 qs0 = sw_context->qs0;
                 //fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
 
-                if (ez->n_cigar > 0)
-                    if (0xA0B1C2D3 == ez->revcigar)
+                if (ez->n_cigar > 0) {
+#if !DUMP_FILE
+                    if (0xA0B1C2D3 == ez->revcigar) {
                         reverse_cigar(ez->n_cigar, ez->cigar);
+                    }
+#endif
+                }
 
                 if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0) {
                     mm_align_pair(km, opt, sw_context->qlen, qseq, sw_context->tlen, tseq, mat, sw_context->w, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, sw_context->zdrop_flag, &tmp_ez); // second pass: lift approximate
@@ -792,9 +822,10 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                 fprintf(stderr, "error position flag(%d), read_index:%ld\n", sw_contexts[k]->pos_flag, context->read_index);
             }
         }
-
+        
         if(sw_contexts[k]->pos_flag == 2) {      //right
             if(!dropped) {
+                result_num--;
                 ksw_extz_t* ez = result->ezs[k];
                 sw_context_t* sw_context = sw_contexts[k];
                 int32_t re = sw_context->re;
@@ -807,8 +838,11 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                 //fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
                 if (ez->n_cigar > 0) {
-                    if (0xA0B1C2D3 == ez->revcigar)
+#if !DUMP_FILE
+                    if (0xA0B1C2D3 == ez->revcigar) {
                         reverse_cigar(ez->n_cigar, ez->cigar);
+                    }
+#endif
                     mm_append_cigar(r, ez->n_cigar, ez->cigar);
                     r->p->dp_score += ez->max;
                 }
@@ -858,6 +892,7 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                 //释放该read所有上下文内容
 
                 kfree(km, tmp_ez.cigar);
+                
                 return 1;   //返回1表示该条read成功处理
             }
             kfree(km, tmp_ez.cigar);
@@ -879,6 +914,10 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                 ret = 1;
             }
         }
+        if(result_num != 0) {
+            fprintf(stderr, "read_index=%ld, chain_id=%d, result_num=%d, shenyu result=%d\n", read_id, chain_i, result->result_num, result_num);
+            //assert(0);
+        }
         destroy_results(result);
         //销毁结果数组和所有上下文
         destroy_chain_context(chain_context);
@@ -886,9 +925,68 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
     return ret;
 }
 
+void save_result(int tid, sw_result_t* result)
+{
+    int i;
+    char* buf = NULL;
+    sw_result_t* p_result = NULL;
+    ksw_extz_t* p_ez = NULL;
+    int* id = NULL;
+    uint32_t* p_cigar = NULL;
+    int size = 0;
+
+    char* file_name = (char*)malloc(100);
+    memset(file_name, 0, 100);
+    sprintf(file_name, "result_%d.bin", tid);
+    
+    
+    buf = (char*)malloc(4*1024*1024);
+    if(buf == NULL) {
+        fprintf(stderr, "malloc failed:%s\n", strerror(errno));
+        exit(0);
+    }
+    id = (int*)buf;
+    *id = 0x00077000;
+    p_result = (sw_result_t*)(buf + sizeof(int));
+    *p_result = *result;
+    p_ez = (ksw_extz_t*)((char*)p_result + sizeof(sw_result_t));
+    p_cigar = (uint32_t*)((char*)p_ez + result->result_num * sizeof(ksw_extz_t));
+    
+    for(i = 0; i < result->result_num; i++) {
+        p_ez[i] = *result->ezs[i];
+        memcpy(p_cigar, result->ezs[i]->cigar, result->ezs[i]->n_cigar * sizeof(uint32_t));
+        p_cigar += result->ezs[i]->n_cigar;
+    }
+    
+    size = (char*)p_cigar - buf;
+    
+    FILE* fp = fopen(file_name, "a");
+    if(fp == NULL) {
+        fprintf(stderr, "fopen %s failed:%s\n", file_name, strerror(errno));
+        exit(0);
+    }
+    
+    int ret = fwrite(&size, 1, sizeof(size), fp);
+    if(ret != sizeof(size)) {
+        fprintf(stderr, "fwrite size failed:%s\n", strerror(errno));
+        exit(0);
+    }
+    ret = fwrite(buf, 1, size, fp);
+    if(ret != size) {
+        fprintf(stderr, "fwrite failed:%s\n", strerror(errno));
+        exit(0);
+    }
+    
+    free(buf);
+    fclose(fp);
+    free(file_name);
+    return;
+}
+
 void* sw_result_thread(void* arg)
 {
-    user_params_t *params = (user_params_t*)arg;
+    user_args_t* args = (user_args_t*)arg;
+    user_params_t *params = args->params;
     long read_num = params->read_num;
     while(1) {
         sw_result_t* result = get_result();
@@ -899,20 +997,33 @@ void* sw_result_thread(void* arg)
             }
             continue;
         }
+        
+        save_result(args->tid, result);
+        
         long read_index = result->read_id;
         int chain_id = result->chain_id;
 
         context_t* context = params->read_contexts[read_index];
         //将结果放入对应的位置
-        params->read_results[read_index].chain_results[chain_id] = result;
-        unsigned int chain_result_num = __sync_add_and_fetch(&params->read_results[read_index].chain_result_num, 1);    //加1然后返回加1后的结果
 
+        if(params->read_results[read_index].chain_results[chain_id] != NULL) {
+            fprintf(stderr, "[%s][%d]read_index=%ld, chain_id=%d\n", __FILE__, __LINE__, read_index, chain_id);
+            exit(0);
+        }
+        params->read_results[read_index].chain_results[chain_id] = result;
+        
+        unsigned int chain_result_num = __sync_add_and_fetch(&params->read_results[read_index].chain_result_num, 1);    //加1然后返回加1后的结果
+        
         //判断整条read的chain的结果都返回
         if(chain_result_num == params->chain_num[read_index]) {
             //处理一条read的结果
             int ret = save_read_result(read_index, &params->read_results[read_index], context, chain_result_num,
                                        &params->read_flag[read_index], &params->chain_num[read_index]);
             if(ret == 1) {
+                if(params->read_is_complete[read_index] == 1) {
+                    fprintf(stderr, "read(%ld) already complete\n", read_index);
+                    exit(0);
+                }
                 params->read_is_complete[read_index] = 1;
                 long num = __sync_sub_and_fetch(&params->read_num, 1);
 
@@ -935,8 +1046,16 @@ void* sw_result_thread(void* arg)
                     }
                 }
             }
+            else {
+                fprintf(stderr, "save_read_result ret is not 1\n");
+                exit(0);
+            }
         }
-        else {  //继续接收结果
+        else if(chain_result_num > params->chain_num[read_index]) {  //继续接收结果
+            fprintf(stderr, "chain_result_num=%d, params->chain_num[%ld]=%d\n", chain_result_num, read_index, params->chain_num[read_index]);
+            exit(0);
+        }
+        else {
             continue;
         }
     }

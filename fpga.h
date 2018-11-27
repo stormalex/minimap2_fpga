@@ -44,6 +44,8 @@ int fpga_send_sw(int id, int qlen, char* q, int tlen, char* t);
 
 void fpga_exit_block();
 
+void fpga_set_block();
+
 void fpga_test(void);
 
 #ifdef __cplusplus

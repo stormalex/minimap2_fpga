@@ -332,23 +332,30 @@ int main(int argc, char *argv[])
     
     init_task_array();
     init_result_array();
-
-    /*pthread_t sw_tid[20];
+#if 0
+    pthread_t sw_tid[1];
     int thread_i = 0;
-    for(thread_i = 0; thread_i < 20; thread_i++) {
+    for(thread_i = 0; thread_i < 1; thread_i++) {
         pthread_create(&sw_tid[thread_i], NULL, sw_thread, NULL);
-    }*/
-    
+    }
+#else
+#if !DUMP_FILE
     int ret = fpga_init(BLOCK);
     if(ret) {
         printf("fpga_init failed\n");
         return -1;
     }
-    pthread_t send_tid;
-    pthread_t recv_tid;
-    pthread_create(&send_tid, NULL, send_task_thread, NULL);
-    pthread_create(&recv_tid, NULL, recv_task_thread, NULL);
-
+#endif
+    pthread_t send_tid[10];
+    pthread_t recv_tid[10];
+    int thread_i = 0;
+    int tid[10];
+    for(thread_i = 0; thread_i<1; thread_i++) {
+        tid[thread_i] = thread_i;
+        pthread_create(&send_tid[thread_i], NULL, send_task_thread, tid[thread_i]);
+        pthread_create(&recv_tid[thread_i], NULL, recv_task_thread, tid[thread_i]);
+    }
+#endif
     while ((mi = mm_idx_reader_read(idx_rdr, n_threads)) != 0) {
 		if ((opt.flag & MM_F_CIGAR) && (mi->flag & MM_I_NO_SEQ)) {
 			fprintf(stderr, "[ERROR] the prebuilt index doesn't contain sequences.\n");
@@ -384,18 +391,27 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "[ERROR] failed to write the results\n");
 		exit(EXIT_FAILURE);
 	}
-
-    /*stop_sw_thread();
-    for(thread_i = 0; thread_i < 20; thread_i++) {
+#if 0
+    stop_sw_thread();
+    for(thread_i = 0; thread_i < 1; thread_i++) {
         pthread_join(sw_tid[thread_i], NULL);
-    }*/
+    }
+#else
+    
 
     stop_fpga_thread();
+#if !DUMP_FILE
     fpga_exit_block();
-    pthread_join(send_tid, NULL);
-    pthread_join(recv_tid, NULL);
+#endif
+    for(thread_i = 0; thread_i<1; thread_i++) {
+        pthread_join(send_tid[thread_i], NULL);
+        pthread_join(recv_tid[thread_i], NULL);
+    }
+#if !DUMP_FILE
+    fpga_set_block();
     fpga_finalize();
-
+#endif
+#endif
 	if (mm_verbose >= 3) {
 		fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);
 		fprintf(stderr, "[M::%s] CMD:", __func__);

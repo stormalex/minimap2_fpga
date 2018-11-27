@@ -3,8 +3,9 @@
 
 #include "fpga.h"
 
+#define DUMP_FILE   0   //0:fpga  1:soft
+
 #define SEND_ARRAY_SIZE     128
-#define SEND_ARRAY_NUM      5
 
 #define ADDR_ALIGN(addr, align)   (((addr)+align-1)&~( align-1))
 

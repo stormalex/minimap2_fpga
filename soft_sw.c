@@ -20,8 +20,8 @@
 static int sw_stop_flag = 1;
 
 //保存上下文的数组
-context_t* context_array[CONTEXT_NUM];
-pthread_mutex_t context_mutex = PTHREAD_MUTEX_INITIALIZER;
+static context_t* context_array[CONTEXT_NUM];
+static pthread_mutex_t context_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void init_context()
 {
@@ -57,8 +57,8 @@ context_t* delete_context(int i)
 }
 
 //保存任务的数组
-chain_sw_task_t* chain_tasks_array[CHAIN_TASK_NUM];
-pthread_mutex_t tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
+static chain_sw_task_t* chain_tasks_array[CHAIN_TASK_NUM];
+static pthread_mutex_t tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int tasks_head = 0;
 static int tasks_tail = 0;
 
@@ -116,8 +116,8 @@ chain_sw_task_t* get_task()
 
 
 //保存结果的数组
-sw_result_t* results_array[CHAIN_RESULT_NUM];
-pthread_mutex_t results_mutex = PTHREAD_MUTEX_INITIALIZER;
+static sw_result_t* results_array[CHAIN_RESULT_NUM];
+static pthread_mutex_t results_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int results_head = 0;
 static int results_tail = 0;
 static int result_num = 0;
