@@ -711,9 +711,9 @@ void* recv_task_thread(void *arg)
         }
 #else
         fpga_buf = (char*)fpga_get_retbuf(&fpga_len, RET_TYPE_SW);
-        if(fpga_buf == NULL) {
-            fprintf(stderr,"ERROR:fpga_len:%d\n",fpga_len);
-            exit(1);
+        if(fpga_buf == NULL || fpga_len == 0) {
+            fprintf(stderr,"fpga_len:%d\n",fpga_len);
+            return NULL;
         }
         if(fpga_len > 4 * 1024 * 1024) {
             fprintf(stderr, "fpga_len=%d\n", fpga_len);

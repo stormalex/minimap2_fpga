@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include "kthread.h"
 #include "kvec.h"
@@ -13,7 +14,7 @@
 #include "khash.h"
 
 
-void* sw_result_thread(void* arg);
+static void* sw_result_thread(void* arg);
 
 struct mm_tbuf_s {
 	void *km;
@@ -571,12 +572,12 @@ static void *worker_pipeline(void *shared, int step, void *in)
         else {
             fprintf(stderr, "%ld read do not process!\n", params.read_num);
         }
-        count++;
+        /*count++;
         for(i = 0; i < 10; i++){
             memset(cmd, 0, sizeof(cmd));
             sprintf(cmd, "mv result_%d.bin %d_tid%d.bin", i, count, i);
             system(cmd);
-        }
+        }*/
         
         free(params.read_results);
         free(params.read_is_complete);
@@ -694,7 +695,8 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
 
         //取出read上下文
         const mm_idx_t *mi = context->mi;
-        void* km = context->b->km;
+        //void* km = context->b->km;
+        void* km = NULL;
         const mm_mapopt_t *opt = context->opt;
         mm128_t *a = context->a;
         int qlen = context->qlen;
@@ -736,6 +738,7 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
             k = 0;  //没有左扩展
             rs1 = rs, qs1 = qs;
         }
+        
         re1 = rs, qe1 = qs;
         assert(qs1 >= 0 && rs1 >= 0);
 
@@ -914,13 +917,11 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                 ret = 1;
             }
         }
-        if(result_num != 0) {
-            fprintf(stderr, "read_index=%ld, chain_id=%d, result_num=%d, shenyu result=%d\n", read_id, chain_i, result->result_num, result_num);
-            //assert(0);
-        }
+
         destroy_results(result);
         //销毁结果数组和所有上下文
         destroy_chain_context(chain_context);
+        context->chain_contexts[chain_i] = NULL;
     }
     return ret;
 }
@@ -982,8 +983,8 @@ void save_result(int tid, sw_result_t* result)
     free(file_name);
     return;
 }
-
-void* sw_result_thread(void* arg)
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static void* sw_result_thread(void* arg)
 {
     user_args_t* args = (user_args_t*)arg;
     user_params_t *params = args->params;
@@ -997,13 +998,11 @@ void* sw_result_thread(void* arg)
             }
             continue;
         }
-        
-        save_result(args->tid, result);
-        
+
+        //save_result(args->tid, result);
         long read_index = result->read_id;
         int chain_id = result->chain_id;
 
-        context_t* context = params->read_contexts[read_index];
         //将结果放入对应的位置
 
         if(params->read_results[read_index].chain_results[chain_id] != NULL) {
@@ -1017,9 +1016,12 @@ void* sw_result_thread(void* arg)
         //判断整条read的chain的结果都返回
         if(chain_result_num == params->chain_num[read_index]) {
             //处理一条read的结果
+            context_t* context = params->read_contexts[read_index];
             int ret = save_read_result(read_index, &params->read_results[read_index], context, chain_result_num,
                                        &params->read_flag[read_index], &params->chain_num[read_index]);
             if(ret == 1) {
+                free(context);
+                params->read_contexts[read_index] = NULL;
                 if(params->read_is_complete[read_index] == 1) {
                     fprintf(stderr, "read(%ld) already complete\n", read_index);
                     exit(0);
@@ -1039,8 +1041,10 @@ void* sw_result_thread(void* arg)
                         fprintf(stderr, "some read have not complete\n");
                     }
                     else {
-                        params->exit = 1;
+                        sleep(3);
+                        
                         fprintf(stderr, "2.thread exit\n");
+                        params->exit = 1;
                         fprintf(stderr, "sw result thread exit, zero_seed_num=%ld read num=%ld\n", params->zero_seed_num, params->read_num);
                         return NULL;
                     }
@@ -1051,11 +1055,11 @@ void* sw_result_thread(void* arg)
                 exit(0);
             }
         }
-        else if(chain_result_num > params->chain_num[read_index]) {  //继续接收结果
+        else if(chain_result_num > params->chain_num[read_index]) {
             fprintf(stderr, "chain_result_num=%d, params->chain_num[%ld]=%d\n", chain_result_num, read_index, params->chain_num[read_index]);
             exit(0);
         }
-        else {
+        else {  //继续接收结果
             continue;
         }
     }

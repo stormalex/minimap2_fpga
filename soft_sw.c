@@ -169,7 +169,6 @@ sw_result_t* get_result()
         return NULL;
     }
     tmp = results_array[results_head];
-    results_array[results_head] = NULL;
     result_num--;
     results_head = (results_head + 1) % CHAIN_RESULT_NUM;
     
