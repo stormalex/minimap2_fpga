@@ -232,7 +232,7 @@ void sw(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *targe
 			if(!approx_max) Hen1 = en>0?H[en-1]:Hen1;
 			//fprintf(stderr,"\nr=%d  st=%d en=%d\npr: ",r,st,en);
 			for (t = st; t <= en; ++t) {				
-				int8_t d, z, a, b, a2, b2, xt1, x2t1, vt1, ut, tmp;
+				int8_t d, z, a, b, a2, b2, xt1, x2t1, vt1, ut;
 				z = s[t];
 				xt1 = x1;
 				x1 = x[t];
@@ -709,6 +709,7 @@ void* send_task_thread(void* arg)
 
 void* recv_task_thread(void *arg)
 {
+    fprintf(stderr, "start recv task thread\n");
     char* fpga_buf = NULL;
     int fpga_len;
     fpga_task_t* head = NULL;

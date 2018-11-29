@@ -158,6 +158,7 @@ typedef struct {
     char* read_is_complete;             //记录一条read有没有处理完成
     context_t** read_contexts;          //记录每条read的上下文指针
     read_result_t* read_results;        //数组里的每一个元素记录一个read的所有chain的结果
+    send_task_t*  send_task;            //待发送数据
 
     int exit;                           //线程退出标志
 }user_params_t;
@@ -297,7 +298,7 @@ void mm_tbuf_destroy(mm_tbuf_t *b);
  */
 mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *name);
 
-void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long i, user_params_t* params);
+void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long i, user_params_t* params, int tid);
 
 /**
  * Align a fasta/fastq file and print alignments to stdout

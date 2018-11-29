@@ -99,8 +99,6 @@ static inline void yes_or_no(mm_mapopt_t *opt, int flag, int long_idx, const cha
 void init_task_array();
 void init_result_array();
 void stop_sw_thread();
-extern long long_chain_counter;
-extern long recv_task;
 
 int main(int argc, char *argv[])
 {
@@ -348,15 +346,15 @@ int main(int argc, char *argv[])
         return -1;
     }
 #endif
-    pthread_t send_tid[10];
+    /*pthread_t send_tid[10];
     pthread_t recv_tid[10];
     int thread_i = 0;
     int tid[10];
     for(thread_i = 0; thread_i<1; thread_i++) {
         tid[thread_i] = thread_i;
-        pthread_create(&send_tid[thread_i], NULL, send_task_thread, tid[thread_i]);
+        pthread_create(&send_tid[thread_i], NULL, send_task_thread, (void*)tid[thread_i]);
         pthread_create(&recv_tid[thread_i], NULL, recv_task_thread, tid[thread_i]);
-    }
+    }*/
 #endif
     while ((mi = mm_idx_reader_read(idx_rdr, n_threads)) != 0) {
 		if ((opt.flag & MM_F_CIGAR) && (mi->flag & MM_I_NO_SEQ)) {
@@ -405,18 +403,16 @@ int main(int argc, char *argv[])
 #if !DUMP_FILE
     fpga_exit_block();
 #endif
-    for(thread_i = 0; thread_i<1; thread_i++) {
+    /*for(thread_i = 0; thread_i<1; thread_i++) {
         pthread_join(send_tid[thread_i], NULL);
         pthread_join(recv_tid[thread_i], NULL);
-    }
+    }*/
 #if !DUMP_FILE
-    fpga_set_block();
-    fpga_finalize();
+    //fpga_set_block();
+    //fpga_finalize();
 #endif
 #endif
-    fprintf(stderr, "long_chain_counter=%ld\n", long_chain_counter);
-    fprintf(stderr, "recv_task=%ld\n", recv_task);
-    printf_total_num();
+
 	if (mm_verbose >= 3) {
 		fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);
 		fprintf(stderr, "[M::%s] CMD:", __func__);

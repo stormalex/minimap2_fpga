@@ -46,6 +46,10 @@ void fpga_exit_block();
 
 void fpga_set_block();
 
+int get_queue_num();
+
+void fpga_set_params(int bw, int is_cdna, int max_skip, int min_sc, int flag, int max_occ);
+
 void fpga_test(void);
 
 #ifdef __cplusplus

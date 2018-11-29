@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <pthread.h>
+#include <errno.h>
 #include "minimap.h"
 #include "mmpriv.h"
 #include "ksw2.h"
@@ -422,6 +423,75 @@ static void mm_fix_bad_ends_splice(void *km, const mm_mapopt_t *opt, const mm_id
 			--(*cnt1);
 	}
 }
+#include "fpga_sw.h"
+static unsigned long long g_tag = 0;
+void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size)
+{
+    char* fpga_buf = NULL;
+    char* p = NULL;
+    fpga_task_t* head = NULL;
+    fpga_task_id_t* chain_head = NULL;
+    fpga_sw_task* sw_task = NULL;
+
+    fpga_buf = (char*)fpga_get_writebuf(data_size + 4096, BUF_TYPE_SW);
+    if(fpga_buf == NULL) {
+        fprintf(stderr, "fpga_get_writebuf sw error:%s\n", strerror(errno));
+        exit(0);
+    }
+
+    head = (fpga_task_t*)fpga_buf;        //指向buff首地址
+    head->check_id = CHECK_ID;
+    head->sw_num = 0;
+    chain_head = (fpga_task_id_t*)(fpga_buf + sizeof(fpga_task_t));
+    sw_task = (fpga_sw_task*)(fpga_buf + 4096);
+    //fprintf(stderr, "fpga_buf=%p\n", fpga_buf);
+    //设置头信息
+    head->tag = g_tag++;
+    head->chain_task_num = chain_num;
+
+    int chain_index = 0;
+    int sw_index = 0;
+    for(chain_index = 0; chain_index < chain_num; chain_index++) {
+        if((char*)chain_head >= (char*)(fpga_buf + 4096)) {
+            fprintf(stderr, "ERROR: too much chain, chain num=%d\n", chain_num);
+            exit(0);
+        }
+
+        //设置chain的信息
+        //fprintf(stderr, "chain_head=%p\n", chain_head);
+        chain_head->read_id = tasks[chain_index]->read_id;
+        chain_head->chain_id = tasks[chain_index]->chain_id;
+        chain_head->sw_num = tasks[chain_index]->sw_num;
+
+        //设置sw任务的数据
+        head->sw_num += chain_head->sw_num;     //统计一次调用sw任务数
+        for(sw_index = 0; sw_index < chain_head->sw_num; sw_index++) {
+            sw_task->qlen = tasks[chain_index]->sw_tasks[sw_index]->qlen;
+            sw_task->tlen = tasks[chain_index]->sw_tasks[sw_index]->tlen;
+            sw_task->flag = tasks[chain_index]->sw_tasks[sw_index]->flag;
+            sw_task->zdrop = tasks[chain_index]->sw_tasks[sw_index]->zdrop;
+            sw_task->bw = tasks[chain_index]->sw_tasks[sw_index]->w;
+            sw_task->end_bonus = tasks[chain_index]->sw_tasks[sw_index]->end_bonus;
+            
+            uint8_t *qseq = (uint8_t*)sw_task + sizeof(fpga_sw_task);    //设置qseq的地址
+            memcpy(qseq, tasks[chain_index]->sw_tasks[sw_index]->query, sw_task->qlen);
+            uint8_t *tseq = qseq + ADDR_ALIGN(sw_task->qlen, 16);
+            memcpy(tseq, tasks[chain_index]->sw_tasks[sw_index]->target, sw_task->tlen);
+            
+            p = (char*)sw_task;
+            sw_task = (fpga_sw_task*)(p + sizeof(fpga_sw_task) + ADDR_ALIGN(sw_task->qlen, 16) + ADDR_ALIGN(sw_task->tlen, 16));    //指向下一个sw任务的地址
+        }
+        chain_head += 1;   //指向下一个chain的头
+        destroy_chain_sw_task(tasks[chain_index]);     //销毁chain任务的数据
+    }
+
+    if((data_size + 4096) != ((char*)sw_task - fpga_buf)) {
+        fprintf(stderr, "fpga_buf=%p, sw_task=%p, data_size=0x%x\n", fpga_buf, sw_task, data_size);
+        exit(0);
+    }
+
+    fpga_writebuf_submit(fpga_buf, data_size + 4096, TYPE_SW);
+}
 
 #define VSCMIN(x,y) ({ \
   typeof(x) _x = (x);     \
@@ -431,7 +501,39 @@ static void mm_fix_bad_ends_splice(void *km, const mm_mapopt_t *opt, const mm_id
 
 static pthread_mutex_t long_chain_mutex = PTHREAD_MUTEX_INITIALIZER;
 long long_chain_counter = 0;
-static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], mm_reg1_t *r, mm_reg1_t *r2, int n_a, mm128_t *a, ksw_extz_t *ez, int splice_flag, long read_index, int chain_index, context_t* context, chain_context_t* chain_context)
+extern volatile int g_total_task_num;
+extern volatile int g_process_task_num;
+
+void process_task(send_task_t* send_task, chain_sw_task_t* task)
+{
+    if(send_task->num == SEND_ARRAY_MAX) {
+        send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size);
+        __sync_add_and_fetch(&g_process_task_num, 1);
+        send_task->num = 0;
+        send_task->data_size = 0;
+    }
+    
+    send_task->chain_tasks[send_task->num++] = task;
+    send_task->data_size += task->data_size;
+
+    if(g_process_task_num < (g_total_task_num/2)) {     //如果任务是总任务的一半以下，则立即发送任务
+        send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size);
+        __sync_add_and_fetch(&g_process_task_num, 1);
+        send_task->num = 0;
+        send_task->data_size = 0;
+    }
+    else if(g_process_task_num >= (g_total_task_num/2)) {
+        if(send_task->num > 64) {
+            send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size);
+            __sync_add_and_fetch(&g_process_task_num, 1);
+            send_task->num = 0;
+            send_task->data_size = 0;
+        }
+    }
+    return;
+}
+
+static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], mm_reg1_t *r, mm_reg1_t *r2, int n_a, mm128_t *a, ksw_extz_t *ez, int splice_flag, long read_index, int chain_index, context_t* context, chain_context_t* chain_context, send_task_t* send_task)
 {
 	int is_sr = !!(opt->flag & MM_F_SR), is_splice = !!(opt->flag & MM_F_SPLICE);
 	int32_t rid = a[r->as].x<<1>>33, rev = a[r->as].x>>63, as1, cnt1;
@@ -807,7 +909,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         while(send_result(result));
     }
     else {
-        while(send_task(chain_task));  //将任务放到任务队列
+        process_task(send_task, chain_task);  //将任务放到待发送队列
     }
 	kfree(km, tseq);
 }
@@ -879,7 +981,7 @@ static inline mm_reg1_t *mm_insert_reg(const mm_reg1_t *r, int i, int *n_regs, m
 	return regs;
 }
 
-void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, const char *qstr, int *n_regs_, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context, user_params_t* params)
+void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, const char *qstr, int *n_regs_, mm_reg1_t *regs, mm128_t *a, long read_index, context_t* context, user_params_t* params, int tid)
 {
 	extern unsigned char seq_nt4_table[256];
 	int32_t i, n_regs = *n_regs_, n_a;
@@ -923,6 +1025,11 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
         __sync_sub_and_fetch(&params->read_num, 1);
     }
 
+    if(tid < 0) {
+        fprintf(stderr, "tid=%d\n", tid);
+        exit(0);
+    }
+    
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;
         chain_context_t* chain_context = create_chain_context();
@@ -948,7 +1055,7 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
 			}
 			regs[i].p->trans_strand = trans_strand;*/
 		} else { // one round of alignment
-			mm_align1(km, opt, mi, qlen, qseq0, &regs[i], &r2, n_a, a, NULL, opt->flag, read_index, i, context, chain_context);
+			mm_align1(km, opt, mi, qlen, qseq0, &regs[i], &r2, n_a, a, NULL, opt->flag, read_index, i, context, chain_context, &params->send_task[tid]);
 			if (opt->flag&MM_F_SPLICE)
 				regs[i].p->trans_strand = opt->flag&MM_F_SPLICE_FOR? 1 : 2;
 		}
