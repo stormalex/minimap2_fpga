@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <pthread.h>
 #include "minimap.h"
 #include "mmpriv.h"
 #include "ksw2.h"
@@ -428,7 +429,8 @@ static void mm_fix_bad_ends_splice(void *km, const mm_mapopt_t *opt, const mm_id
   (void) (&_x == &_y);            \
   _x < _y ? _x : _y; })
 
-
+static pthread_mutex_t long_chain_mutex = PTHREAD_MUTEX_INITIALIZER;
+long long_chain_counter = 0;
 static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], mm_reg1_t *r, mm_reg1_t *r2, int n_a, mm128_t *a, ksw_extz_t *ez, int splice_flag, long read_index, int chain_index, context_t* context, chain_context_t* chain_context)
 {
 	int is_sr = !!(opt->flag & MM_F_SR), is_splice = !!(opt->flag & MM_F_SPLICE);
@@ -799,6 +801,9 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         result->chain_id = chain_task->chain_id;
 
         destroy_chain_sw_task(chain_task);
+        pthread_mutex_lock(&long_chain_mutex);
+        long_chain_counter++;
+        pthread_mutex_unlock(&long_chain_mutex);
         while(send_result(result));
     }
     else {
@@ -904,6 +909,10 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
     context->read_index = read_index;
 
 	//memset(&ez, 0, sizeof(ksw_extz_t));
+    if(params->chain_num[read_index] != 0xffffffff) {
+        fprintf(stderr, "read %ld already have chain num %d\n", read_index, params->chain_num[read_index]);
+        exit(0);
+    }
     params->chain_num[read_index] = n_regs;
     params->read_results[read_index].chain_result_num = 0;
     params->read_results[read_index].chain_results = (sw_result_t**)malloc(n_regs * sizeof(sw_result_t*));

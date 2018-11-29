@@ -99,6 +99,8 @@ static inline void yes_or_no(mm_mapopt_t *opt, int flag, int long_idx, const cha
 void init_task_array();
 void init_result_array();
 void stop_sw_thread();
+extern long long_chain_counter;
+extern long recv_task;
 
 int main(int argc, char *argv[])
 {
@@ -412,6 +414,9 @@ int main(int argc, char *argv[])
     fpga_finalize();
 #endif
 #endif
+    fprintf(stderr, "long_chain_counter=%ld\n", long_chain_counter);
+    fprintf(stderr, "recv_task=%ld\n", recv_task);
+    printf_total_num();
 	if (mm_verbose >= 3) {
 		fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);
 		fprintf(stderr, "[M::%s] CMD:", __func__);

@@ -3,7 +3,8 @@
 #include <assert.h>
 #include <pthread.h>
 #include <errno.h>
-#include <unistd.h>
+#include <unistd.h> 
+#include <fcntl.h> 
 
 #include "kthread.h"
 #include "kvec.h"
@@ -486,8 +487,7 @@ typedef struct {
     int tid;
     user_params_t* params;
 }user_args_t;
-static int count = 0;
-static char cmd[100];
+
 static void *worker_pipeline(void *shared, int step, void *in)
 {
 	int i, j, k;
@@ -523,7 +523,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
         user_params_t params;
         memset(&params, 0, sizeof(params));
 
+        
         params.read_num = ((step_t*)in)->n_frag;
+        long tmp_read_num = params.read_num;
 
         params.read_flag = (char*)malloc(params.read_num);
         memset(params.read_flag, 0, params.read_num);
@@ -533,13 +535,14 @@ static void *worker_pipeline(void *shared, int step, void *in)
         memset(params.read_contexts, 0, params.read_num * sizeof(context_t*));
 
         params.chain_num = (int*)malloc(params.read_num * sizeof(int));
-        memset(params.chain_num, 0, params.read_num * sizeof(int));
+        memset(params.chain_num, 0xff, params.read_num * sizeof(int));
 
         params.read_is_complete = (char*)malloc(params.read_num);
         memset(params.read_is_complete, 0, params.read_num);
 
         params.read_results = (read_result_t*)malloc(params.read_num * sizeof(read_result_t));
         memset(params.read_results, 0, params.read_num * sizeof(read_result_t));
+
 
         int i = 0;
         
@@ -553,9 +556,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
         init_result_array();
 
         //TODO 处理结果的线程
-        user_args_t user_args[10];
-        pthread_t sw_tid[10];
-        for(i = 0; i < 10; i++) {
+        user_args_t user_args[1];
+        pthread_t sw_tid[1];
+        for(i = 0; i < 1; i++) {
             user_args[i].tid = i;
             user_args[i].params = &params;
             pthread_create(&sw_tid[i], NULL, sw_result_thread, &user_args[i]);
@@ -563,7 +566,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 
 		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params);
 
-        for(i = 0; i < 10; i++)
+        for(i = 0; i < 1; i++)
             pthread_join(sw_tid[i], NULL);
 
         if(params.read_num == 0) {
@@ -572,12 +575,6 @@ static void *worker_pipeline(void *shared, int step, void *in)
         else {
             fprintf(stderr, "%ld read do not process!\n", params.read_num);
         }
-        /*count++;
-        for(i = 0; i < 10; i++){
-            memset(cmd, 0, sizeof(cmd));
-            sprintf(cmd, "mv result_%d.bin %d_tid%d.bin", i, count, i);
-            system(cmd);
-        }*/
         
         free(params.read_results);
         free(params.read_is_complete);
@@ -672,7 +669,64 @@ void reverse_cigar(int n_cigar, uint32_t *cigar)
         tmp = cigar[i],cigar[i]=cigar[n_cigar-1-i],cigar[n_cigar-1-i]=tmp;
     return;
 }
+void save_result(int count, long read_id, int chain_id, sw_result_t* result)
+{
+    int i;
+    char* buf = NULL;
+    sw_result_t* p_result = NULL;
+    ksw_extz_t* p_ez = NULL;
+    int* id = NULL;
+    uint32_t* p_cigar = NULL;
+    int size = 0;
+    int ret = 0;
 
+    char* file_name = (char*)malloc(100);
+    memset(file_name, 0, 100);
+    sprintf(file_name, "./10_th_1/result_%d_read_%ld_chain_%d.bin", count, read_id, chain_id);
+    
+    if((access(file_name,F_OK))!=-1)   
+    {   
+        fprintf(stderr, "file %s exist\n", file_name);  
+        exit(0);
+    }  
+    
+    buf = (char*)malloc(4*1024*1024);
+    if(buf == NULL) {
+        fprintf(stderr, "malloc failed:%s\n", strerror(errno));
+        exit(0);
+    }
+    id = (int*)buf;
+    *id = 0x1234abcd;
+    p_result = (sw_result_t*)(buf + sizeof(int));
+    *p_result = *result;
+    p_ez = (ksw_extz_t*)((char*)p_result + sizeof(sw_result_t));
+    p_cigar = (uint32_t*)((char*)p_ez + result->result_num * sizeof(ksw_extz_t));
+    
+    for(i = 0; i < result->result_num; i++) {
+        p_ez[i] = *result->ezs[i];
+        memcpy(p_cigar, result->ezs[i]->cigar, result->ezs[i]->n_cigar * sizeof(uint32_t));
+        p_cigar += result->ezs[i]->n_cigar;
+    }
+    
+    size = (char*)p_cigar - buf;
+    
+    FILE* fp = fopen(file_name, "a");
+    if(fp == NULL) {
+        fprintf(stderr, "fopen %s failed:%s\n", file_name, strerror(errno));
+        exit(0);
+    }
+    
+    ret = fwrite(buf, 1, size, fp);
+    if(ret != size) {
+        fprintf(stderr, "fwrite failed:%s\n", strerror(errno));
+        exit(0);
+    }
+    
+    free(buf);
+    fclose(fp);
+    free(file_name);
+    return;
+}
 static int save_read_result(long read_id, read_result_t* read_result, context_t* context, int num, char* read_flag, int* chain_num)
 {
     int ret = 0;
@@ -683,12 +737,16 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
         chain_context_t* chain_context = context->chain_contexts[chain_i];
         sw_context_t** sw_contexts = chain_context->sw_contexts;
         sw_result_t* result = read_result->chain_results[chain_i];
+        
+        //save_result(g_count, read_id, chain_i, result);
 
         int result_num = result->result_num;
         
         int32_t rs1, qs1, re1, qe1;
         int32_t dropped = 0;
         mm_reg1_t r2;
+        //r2.cnt = 0;
+        memset(&r2, 0, sizeof(r2));
 
         mm_reg1_t *r = &(context->regs0[chain_context->i]);
         mm_reg1_t *regs = context->regs0;
@@ -877,7 +935,6 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
             *(context->n_regs) = n_regs0;           //保存结果
             context->regs[0] = context->regs0_ori;  //保存结果
             //释放该read所有上下文内容
-
             return 1;   //返回1表示该条read成功处理
         }
         if (chain_context->i > 0 && regs[chain_context->i].split_inv) {
@@ -895,7 +952,6 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                 //释放该read所有上下文内容
 
                 kfree(km, tmp_ez.cigar);
-                
                 return 1;   //返回1表示该条read成功处理
             }
             kfree(km, tmp_ez.cigar);
@@ -925,65 +981,40 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
     }
     return ret;
 }
-
-void save_result(int tid, sw_result_t* result)
+/*
+void save_chain_num(long read_id, int chain_num)
 {
-    int i;
-    char* buf = NULL;
-    sw_result_t* p_result = NULL;
-    ksw_extz_t* p_ez = NULL;
-    int* id = NULL;
-    uint32_t* p_cigar = NULL;
-    int size = 0;
-
+    int ret;
     char* file_name = (char*)malloc(100);
     memset(file_name, 0, 100);
-    sprintf(file_name, "result_%d.bin", tid);
+    sprintf(file_name, "./1th_chain_num/%d_read_%ld.bin", g_count, read_id);
+    char buf[100];
+    memset(buf, 0, 100);
     
-    
-    buf = (char*)malloc(4*1024*1024);
-    if(buf == NULL) {
-        fprintf(stderr, "malloc failed:%s\n", strerror(errno));
+    if((access(file_name,F_OK))!=-1)
+    {   
+        fprintf(stderr, "file %s exist\n", file_name);  
         exit(0);
     }
-    id = (int*)buf;
-    *id = 0x00077000;
-    p_result = (sw_result_t*)(buf + sizeof(int));
-    *p_result = *result;
-    p_ez = (ksw_extz_t*)((char*)p_result + sizeof(sw_result_t));
-    p_cigar = (uint32_t*)((char*)p_ez + result->result_num * sizeof(ksw_extz_t));
-    
-    for(i = 0; i < result->result_num; i++) {
-        p_ez[i] = *result->ezs[i];
-        memcpy(p_cigar, result->ezs[i]->cigar, result->ezs[i]->n_cigar * sizeof(uint32_t));
-        p_cigar += result->ezs[i]->n_cigar;
-    }
-    
-    size = (char*)p_cigar - buf;
-    
     FILE* fp = fopen(file_name, "a");
     if(fp == NULL) {
-        fprintf(stderr, "fopen %s failed:%s\n", file_name, strerror(errno));
+        fprintf(stderr, "fopen %s failed\n", file_name);
         exit(0);
     }
-    
-    int ret = fwrite(&size, 1, sizeof(size), fp);
-    if(ret != sizeof(size)) {
-        fprintf(stderr, "fwrite size failed:%s\n", strerror(errno));
+    snprintf(buf, 100, "%d", chain_num);
+    int len = strlen(buf);
+    ret = fwrite(&buf, 1, len, fp);
+    if(ret != len) {
+        fprintf(stderr, "fwrite %s failed\n", file_name);
         exit(0);
     }
-    ret = fwrite(buf, 1, size, fp);
-    if(ret != size) {
-        fprintf(stderr, "fwrite failed:%s\n", strerror(errno));
-        exit(0);
-    }
-    
-    free(buf);
     fclose(fp);
     free(file_name);
     return;
 }
+*/
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+long recv_task = 0;
 static void* sw_result_thread(void* arg)
 {
     user_args_t* args = (user_args_t*)arg;
@@ -999,7 +1030,10 @@ static void* sw_result_thread(void* arg)
             continue;
         }
 
-        //save_result(args->tid, result);
+        pthread_mutex_lock(&mutex);
+        recv_task++;
+        pthread_mutex_unlock(&mutex);
+        
         long read_index = result->read_id;
         int chain_id = result->chain_id;
 
@@ -1011,13 +1045,14 @@ static void* sw_result_thread(void* arg)
         }
         params->read_results[read_index].chain_results[chain_id] = result;
         
-        unsigned int chain_result_num = __sync_add_and_fetch(&params->read_results[read_index].chain_result_num, 1);    //加1然后返回加1后的结果
+        int chain_result_num = __sync_add_and_fetch(&params->read_results[read_index].chain_result_num, 1);    //加1然后返回加1后的结果
         
         //判断整条read的chain的结果都返回
         if(chain_result_num == params->chain_num[read_index]) {
+            //save_chain_num(read_index, chain_result_num);
             //处理一条read的结果
             context_t* context = params->read_contexts[read_index];
-            int ret = save_read_result(read_index, &params->read_results[read_index], context, chain_result_num,
+            int ret = save_read_result(read_index, &params->read_results[read_index], context, params->chain_num[read_index],
                                        &params->read_flag[read_index], &params->chain_num[read_index]);
             if(ret == 1) {
                 free(context);

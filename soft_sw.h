@@ -139,7 +139,7 @@ typedef struct {
 }sw_result_t;
 
 typedef struct {
-    unsigned int chain_result_num;
+    int chain_result_num;
     sw_result_t** chain_results;
 }read_result_t;
 
@@ -205,7 +205,7 @@ void destroy_chain_context(chain_context_t* chain_context);
 int result_empty();
 
 void init_result_array();
-
+void printf_total_num();
 chain_sw_task_t* get_task();
 int send_result(sw_result_t* results);
 #endif //__SOFT_SW_H__

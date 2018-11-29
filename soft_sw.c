@@ -62,6 +62,9 @@ static pthread_mutex_t tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int tasks_head = 0;
 static int tasks_tail = 0;
 
+static long total_send_task = 0;
+static long total_recv_task = 0;
+
 void init_task_array()
 {
     memset(chain_tasks_array, 0, sizeof(chain_tasks_array));
@@ -88,7 +91,7 @@ int send_task(chain_sw_task_t* chain_sw_tasks)
         //fprintf(stderr, "task ringbuf is full\n");
         return -1;
     }
-    
+    total_send_task++;
     chain_tasks_array[tasks_tail] = chain_sw_tasks;
     //fprintf(stderr, "task insert to %d\n", tasks_tail);
     tasks_tail = (tasks_tail + 1) % CHAIN_TASK_NUM;
@@ -107,6 +110,7 @@ chain_sw_task_t* get_task()
         //fprintf(stderr, "task ringbuf is empty\n");
         return NULL;
     }
+    total_recv_task++;
     tmp = chain_tasks_array[tasks_head];
     //fprintf(stderr, "task take from %d\n", tasks_head);
     tasks_head = (tasks_head + 1) % CHAIN_TASK_NUM;
@@ -121,6 +125,9 @@ static pthread_mutex_t results_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int results_head = 0;
 static int results_tail = 0;
 static int result_num = 0;
+
+static long total_send_result = 0;
+static long total_recv_result = 0;
 
 void init_result_array()
 {
@@ -148,7 +155,7 @@ int send_result(sw_result_t* results)
         //fprintf(stderr, "result ringbuf is full\n");
         return -1;
     }
-    
+    total_send_result++;
     results_array[results_tail] = results;
     result_num++;
     //fprintf(stderr, "result insert to %d\n", results_tail);
@@ -168,6 +175,7 @@ sw_result_t* get_result()
         //fprintf(stderr, "result ringbuf is empty\n");
         return NULL;
     }
+    total_recv_result++;
     tmp = results_array[results_head];
     result_num--;
     results_head = (results_head + 1) % CHAIN_RESULT_NUM;
@@ -186,6 +194,14 @@ int result_empty()
     }
     pthread_mutex_unlock(&results_mutex);
     return result_num;
+}
+
+void printf_total_num()
+{
+    fprintf(stderr, "total send task=%ld\n", total_send_task);
+    fprintf(stderr, "total recv task=%ld\n", total_recv_task);
+    fprintf(stderr, "total send result=%ld\n", total_send_result);
+    fprintf(stderr, "total recv result=%ld\n", total_recv_result);
 }
 
 sw_task_t* create_sw_task(int qlen,

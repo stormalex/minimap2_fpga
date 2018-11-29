@@ -495,6 +495,14 @@ void stop_fpga_thread()
     send_thread_flag = 0;
 }
 #define SW_TASK_NUM 20000
+static pthread_mutex_t send_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t recv_mutex = PTHREAD_MUTEX_INITIALIZER;
+static long send_counter = 0;
+static long recv_counter = 0;
+
+static unsigned long long sw_num = 0;
+static unsigned long long ez_num = 0;
+static unsigned long long cigar_num = 0;
 
 void* send_task_thread(void* arg)
 {
@@ -542,6 +550,10 @@ void* send_task_thread(void* arg)
                 continue;
             }
 
+            pthread_mutex_lock(&send_mutex);
+            send_counter += chain_num;
+            pthread_mutex_unlock(&send_mutex);
+            
             if((data_size + 4096) > 4 * 1024 * 1024) {
                 fprintf(stderr, "data_size too large:%d\n", data_size);
                 exit(0);
@@ -610,6 +622,8 @@ void* send_task_thread(void* arg)
                     
                     p = (char*)sw_task;
                     sw_task = (fpga_sw_task*)(p + sizeof(fpga_sw_task) + ADDR_ALIGN(sw_task->qlen, 16) + ADDR_ALIGN(sw_task->tlen, 16));    //指向下一个sw任务的地址
+                
+                    sw_num++;
                 }
 
                 
@@ -685,6 +699,8 @@ void* send_task_thread(void* arg)
             data_size = 0;
         }
     }
+    fprintf(stderr, "send_counter=%ld\n", send_counter);
+    fprintf(stderr, "sw_num=%lld\n", sw_num);
     free(task_array);
     free(in_file);
     free(out_file);
@@ -713,6 +729,9 @@ void* recv_task_thread(void *arg)
         fpga_buf = (char*)fpga_get_retbuf(&fpga_len, RET_TYPE_SW);
         if(fpga_buf == NULL || fpga_len == 0) {
             fprintf(stderr,"fpga_len:%d\n",fpga_len);
+            fprintf(stderr, "recv_counter=%ld\n", recv_counter);
+            fprintf(stderr, "ez_num=%lld\n", ez_num);
+            fprintf(stderr, "cigar_num=%lld\n", cigar_num);
             return NULL;
         }
         if(fpga_len > 4 * 1024 * 1024) {
@@ -759,8 +778,14 @@ void* recv_task_thread(void *arg)
                 p = (char*)cigar_addr;
                 cigar_addr = (uint32_t *)(p + ADDR_ALIGN(ez->n_cigar*sizeof(uint32_t), 16));  //移动到下一个cigar开头
                 add_result(result, ez); //将ez结果加入到chain结果中
+                ez_num++;
+                cigar_num += ez->n_cigar;
             }
             
+            pthread_mutex_lock(&recv_mutex);
+            recv_counter++;
+            pthread_mutex_unlock(&recv_mutex);
+        
             while(send_result(result)); //发送给结果处理线程
 
         }
@@ -770,6 +795,7 @@ void* recv_task_thread(void *arg)
         fpga_release_retbuf(fpga_buf);
 #endif
     }
+    
     return NULL;
 }
 
