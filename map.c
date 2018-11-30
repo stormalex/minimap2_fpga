@@ -366,10 +366,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	if (n_segs == 1) { // uni-segment
         //创建read上下文并保存在全局数组中
-        if(params->read_contexts[read_index] != NULL) {
-            fprintf(stderr, "%ld read context is not NULL\n", read_index);
-            exit(1);
-        }
+        assert(params->read_contexts[read_index] == NULL);
         context_t* context = create_context(read_index);
         params->read_contexts[read_index] = context;
         context->b = b;
@@ -572,18 +569,22 @@ static void *worker_pipeline(void *shared, int step, void *in)
         init_result_array();
 
         //TODO 处理结果的线程
-        user_args_t user_args[26];
-        pthread_t sw_tid[26];
-        for(i = 0; i < 26; i++) {
+        user_args_t user_args[10];
+        pthread_t sw_tid[10];
+        for(i = 0; i < 10; i++) {
             user_args[i].tid = i;
             user_args[i].params = &params;
             pthread_create(&sw_tid[i], NULL, sw_result_thread, &user_args[i]);
         }
 
 		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params);
-
-        for(i = 0; i < 26; i++)
+        struct timespec start, end;
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        for(i = 0; i < 10; i++)
             pthread_join(sw_tid[i], NULL);
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        fprintf(stderr, "%lu %lu\n", start.tv_sec, start.tv_nsec);
+        fprintf(stderr, "%lu %lu\n", end.tv_sec, end.tv_nsec);
 
         if(params.read_num == 0) {
             fprintf(stderr, "all read ok!\n");
@@ -949,10 +950,7 @@ int save_chain_result(sw_result_t* result, user_params_t* params, long read_num)
     long read_index = result->read_id;
     int chain_id = result->chain_id;
     //fprintf(stderr, "read_num=%ld\n", read_num);
-    if(params->read_results[read_index].chain_results[chain_id] != NULL) {
-        fprintf(stderr, "[%s][%d]read_index=%ld, chain_id=%d\n", __FILE__, __LINE__, read_index, chain_id);
-        exit(0);
-    }
+    assert(params->read_results[read_index].chain_results[chain_id] == NULL);
     params->read_results[read_index].chain_results[chain_id] = result;
     
     int chain_result_num = __sync_add_and_fetch(&params->read_results[read_index].chain_result_num, 1);    //加1然后返回加1后的结果
@@ -967,10 +965,7 @@ int save_chain_result(sw_result_t* result, user_params_t* params, long read_num)
         if(ret == 1) {
             free(context);
             params->read_contexts[read_index] = NULL;
-            if(params->read_is_complete[read_index] == 1) {
-                fprintf(stderr, "read(%ld) already complete\n", read_index);
-                exit(0);
-            }
+            assert(params->read_is_complete[read_index] == 0);  //判断该read是否已经做完
             params->read_is_complete[read_index] = 1;
             long num = __sync_sub_and_fetch(&params->read_num, 1);
             //fprintf(stderr, "num=%ld\n", num);
@@ -995,12 +990,12 @@ int save_chain_result(sw_result_t* result, user_params_t* params, long read_num)
         }
         else {
             fprintf(stderr, "save_read_result ret is not 1\n");
-            exit(0);
+            assert(0);
         }
     }
     else if(chain_result_num > params->chain_num[read_index]) {
         fprintf(stderr, "chain_result_num=%d, params->chain_num[%ld]=%d\n", chain_result_num, read_index, params->chain_num[read_index]);
-        exit(0);
+        assert(0);
     }
     return 0;
 }
@@ -1033,6 +1028,7 @@ static void* sw_result_thread(void* arg)
             exit(0);
         }
         if(fpga_len > 4 * 1024 * 1024) {
+            fpga_release_retbuf(fpga_buf);
             fprintf(stderr, "fpga_len=%d\n", fpga_len);
             exit(0);
         }

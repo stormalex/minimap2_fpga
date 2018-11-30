@@ -452,10 +452,7 @@ void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size)
     int chain_index = 0;
     int sw_index = 0;
     for(chain_index = 0; chain_index < chain_num; chain_index++) {
-        if((char*)chain_head >= (char*)(fpga_buf + 4096)) {
-            fprintf(stderr, "ERROR: too much chain, chain num=%d\n", chain_num);
-            exit(0);
-        }
+        assert((char*)chain_head < (char*)(fpga_buf + 4096));
 
         //设置chain的信息
         //fprintf(stderr, "chain_head=%p\n", chain_head);
@@ -485,10 +482,7 @@ void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size)
         destroy_chain_sw_task(tasks[chain_index]);     //销毁chain任务的数据
     }
 
-    if((data_size + 4096) != ((char*)sw_task - fpga_buf)) {
-        fprintf(stderr, "fpga_buf=%p, sw_task=%p, data_size=0x%x\n", fpga_buf, sw_task, data_size);
-        exit(0);
-    }
+    assert((data_size + 4096) == ((char*)sw_task - fpga_buf));
 
     fpga_writebuf_submit(fpga_buf, data_size + 4096, TYPE_SW);
 }
@@ -523,7 +517,7 @@ void process_task(send_task_t* send_task, chain_sw_task_t* task)
         send_task->data_size = 0;
     }
     else if(g_process_task_num >= (g_total_task_num/2)) {
-        if(send_task->num > 64) {
+        if(send_task->num > 16) {
             send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size);
             __sync_add_and_fetch(&g_process_task_num, 1);
             send_task->num = 0;
@@ -1011,10 +1005,7 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
     context->read_index = read_index;
 
 	//memset(&ez, 0, sizeof(ksw_extz_t));
-    if(params->chain_num[read_index] != 0xffffffff) {
-        fprintf(stderr, "read %ld already have chain num %d\n", read_index, params->chain_num[read_index]);
-        exit(0);
-    }
+    assert(params->chain_num[read_index] == 0xffffffff);
     params->chain_num[read_index] = n_regs;
     params->read_results[read_index].chain_result_num = 0;
     params->read_results[read_index].chain_results = (sw_result_t**)malloc(n_regs * sizeof(sw_result_t*));
@@ -1025,10 +1016,7 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
         __sync_sub_and_fetch(&params->read_num, 1);
     }
 
-    if(tid < 0) {
-        fprintf(stderr, "tid=%d\n", tid);
-        exit(0);
-    }
+    assert(tid >= 0);
     
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;
