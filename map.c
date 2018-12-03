@@ -556,9 +556,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
         init_result_array();
 
         //TODO 处理结果的线程
-        user_args_t user_args[1];
-        pthread_t sw_tid[1];
-        for(i = 0; i < 1; i++) {
+        user_args_t user_args[10];
+        pthread_t sw_tid[10];
+        for(i = 0; i < 10; i++) {
             user_args[i].tid = i;
             user_args[i].params = &params;
             pthread_create(&sw_tid[i], NULL, sw_result_thread, &user_args[i]);
@@ -566,7 +566,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 
 		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params);
 
-        for(i = 0; i < 1; i++)
+        for(i = 0; i < 10; i++)
             pthread_join(sw_tid[i], NULL);
 
         if(params.read_num == 0) {
