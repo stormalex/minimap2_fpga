@@ -49,7 +49,14 @@ int write64(uint8_t *buff, int n, int nall, FILE* fp)
     }
     return newn;
 }
-
+void write64_bin(uint8_t* buff, int n, FILE* fp)
+{
+    char s[64];
+    for (int i = 0; i < n; i++) {
+        fwrite(&buff[i], 1, 1, fp);
+    }
+    return;
+}
 int fit4k(int nall, FILE* fp)
 {
     uint8_t zero[64] = {0};
@@ -542,6 +549,7 @@ mm_idx_t *mm_idx_gen(mm_bseq_file_t *fp, int w, int k, int b, int flag, int mini
     mm_idx_t *mi = pl.mi;
     int i, j;
     FILE *fidxb, *fidxh, *fidxp, *fidxv;
+    FILE *fidxb_bin, *fidxh_bin, *fidxp_bin, *fidxv_bin;
     FILE *fidxbt, *fidxht, *fidxpt, *fidxvt;
     if ((fidxb = fopen("idxb.txt", "w")) == NULL) {
         perror("open data file failed!");
@@ -563,6 +571,22 @@ mm_idx_t *mm_idx_gen(mm_bseq_file_t *fp, int w, int k, int b, int flag, int mini
         perror("open data file failed!");
         exit(1);
     }
+    if ((fidxb_bin = fopen("idxb.dat", "w")) == NULL) {
+        perror("open data file failed!");
+        exit(1);
+    }
+    if ((fidxh_bin = fopen("idxh.dat", "w")) == NULL) {
+        perror("open data file failed!");
+        exit(1);
+    }
+    if ((fidxp_bin = fopen("idxp.dat", "w")) == NULL) {
+        perror("open data file failed!");
+        exit(1);
+    }
+    if ((fidxv_bin = fopen("idxv.dat", "w")) == NULL) {
+        perror("open data file failed!");
+        exit(1);
+    }
 
     //gen idx data
     uint64_t allh = 0;
@@ -580,6 +604,7 @@ mm_idx_t *mm_idx_gen(mm_bseq_file_t *fp, int w, int k, int b, int flag, int mini
             B[0] =(((allp&0xFF)<<56) | n_buckets<<24);
             fprintf(fidxbt, "%lx %lx %x\n", allh, allp, n_buckets);
             szb = write64((uint8_t *)B, 16, szb, fidxb);
+            write64_bin((uint8_t *)B, 16, fidxb_bin);
 
             //set B
             mi->B[i].hoff = allh;
@@ -601,10 +626,12 @@ mm_idx_t *mm_idx_gen(mm_bseq_file_t *fp, int w, int k, int b, int flag, int mini
                 a[0] |= keys&0xffff;
                 a[0] = a[0]<<48;
                 szh = write64((uint8_t *)a, 16, szh, fidxh);
+                write64_bin((uint8_t *)a, 16, fidxh_bin);
 
                 //Get Values Array
                 values = h->vals[j];//value是后期可能要优化为48bit    21-bit|22-bit|padding
                 szv = write64((uint8_t *)&values, 8, szv, fidxv);
+                write64_bin((uint8_t *)&values, 8, fidxv_bin);
 				loop_num++;
             }
 
@@ -613,10 +640,12 @@ mm_idx_t *mm_idx_gen(mm_bseq_file_t *fp, int w, int k, int b, int flag, int mini
             for(int j = 0;j < n;++j){
                 values = mi->B[i].p[j];
                 szp = write64((uint8_t *)&values, 8, szp, fidxp);
+                write64_bin((uint8_t *)&values, 8, fidxp_bin);
             }
         } else {
             fprintf(fidxbt, "%lx %lx %x\n", 0L, 0L, 0);
             szb = write64((uint8_t *)B, 16, szb, fidxb);
+            write64_bin((uint8_t *)B, 16, fidxb_bin);
         }
     }
 
@@ -630,6 +659,10 @@ mm_idx_t *mm_idx_gen(mm_bseq_file_t *fp, int w, int k, int b, int flag, int mini
     fclose(fidxh);
     fclose(fidxp);
     fclose(fidxv);
+    fclose(fidxb_bin);
+    fclose(fidxh_bin);
+    fclose(fidxp_bin);
+    fclose(fidxv_bin);
 
     fclose(fidxbt);
 
