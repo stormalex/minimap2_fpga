@@ -503,6 +503,7 @@ static long recv_counter = 0;
 static unsigned long long sw_num = 0;
 static unsigned long long ez_num = 0;
 static unsigned long long cigar_num = 0;
+static unsigned long long tag = 0;
 
 void* send_task_thread(void* arg)
 {
@@ -516,7 +517,6 @@ void* send_task_thread(void* arg)
     fpga_sw_task* sw_task = NULL;
     int wait_number = 0;
     int send_flag = 0;
-    unsigned long long tag = 0;
 
     char* in_file = (char*)malloc(100);
     char* out_file = (char*)malloc(100);
