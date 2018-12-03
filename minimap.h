@@ -56,12 +56,19 @@ typedef struct {
 } mm_idx_seq_t;
 
 typedef struct {
+    int rid;
+    char rname[256];
+} rname_rid_t ;
+
+typedef struct {
 	int32_t b, w, k, flag;
 	uint32_t n_seq;            // number of reference sequences
 	mm_idx_seq_t *seq;         // sequence name, length and offset
 	uint32_t *S;               // 4-bit packed sequence
 	struct mm_idx_bucket_s *B; // index (hidden)
 	void *km, *h;
+    rname_rid_t *rname_rid;
+    int *rever_rid;
 } mm_idx_t;
 
 // minimap2 alignment

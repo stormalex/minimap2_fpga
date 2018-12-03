@@ -92,6 +92,7 @@ static inline void yes_or_no(mm_mapopt_t *opt, int flag, int long_idx, const cha
 	}
 }
 
+
 int main(int argc, char *argv[])
 {
 	const char *opt_str = "2aSDw:k:K:t:r:f:Vv:g:G:I:d:XT:s:x:Hcp:M:n:z:A:B:O:E:m:N:Qu:R:hF:LC:y";
@@ -325,10 +326,12 @@ int main(int argc, char *argv[])
 					fprintf(stderr, "[WARNING]\033[1;31m For a multi-part index, no @SQ lines will be outputted.\033[0m\n");
 			}
 		}
+		//fprintf(stderr,"finished work_post\n");
 		if (mm_verbose >= 3)
 			fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built the index for %d target sequence(s)\n",
 					__func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->n_seq);
 		if (argc != optind + 1) mm_mapopt_update(&opt, mi);
+
 		if (mm_verbose >= 3) mm_idx_stat(mi);
 		if (!(opt.flag & MM_F_FRAG_MODE)) {
 			for (i = optind + 1; i < argc; ++i)
@@ -336,7 +339,12 @@ int main(int argc, char *argv[])
 		} else {
 			mm_map_file_frag(mi, argc - (optind + 1), (const char**)&argv[optind + 1], &opt, n_threads);
 		}
+
+        free(mi->rever_rid);
+        free(mi->rname_rid);
+
 		mm_idx_destroy(mi);
+        
 	}
 	mm_idx_reader_close(idx_rdr);
 

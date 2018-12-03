@@ -1,0 +1,17 @@
+ref=/home/refdata/GCA_000001405.27_GRCh38.p12_genomic_ont.mmi
+refpb=/home/refdata/GCA_000001405.27_GRCh38.p12_genomic_pb.mmi
+avadata1=/home/data/raconD/Ant.passed.fasta
+avadata2=/home/data/raconD/Celegans/Celegans.fasta
+avadata3=/home/data/raconD/Bacillus/SRR5117788.fastq
+data4=/home/data/minimap2D/np.new.fasta
+avadata5=/home/data/raconD/Yersinia/SRR5117441.fastq
+tdata=/home/data/raconD/Bacillus/part0.B.fq
+tdata2=/home/data/raconD/Yersinia/part2.Y.fq
+#time ./minimap2 -t 56 -x ava-ont $avadata3 $avadata3 >B.paf
+#time ./minimap2 -t 56 -x ava-pb $avadata2 $avadata2 >C.paf
+#time ./minimap2 -t 10 -x ava-ont $avadata5 $avadata5 >Y.paf
+#time ./minimap2 -t 56 -x ava-ont $data4 $data4 >33G.paf
+#time ./minimap2 -t 56 -x ava-ont $avadata1 $avadata1 >A.paf
+#time ./minimap2 -t 1 -x ava-ont nanowgs32.fastq nanowgs32.fastq >nanowgs32.paf
+time ./minimap2 -t 1 -x ava-ont $tdata2 $tdata2 >part.y.paf
+#time ./minimap2 -t 1 -x ava-ont $avadata3 $tdata >ol.paf
