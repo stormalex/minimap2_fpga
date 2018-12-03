@@ -352,7 +352,7 @@ int main(int argc, char *argv[])
     pthread_t recv_tid[10];
     int thread_i = 0;
     int tid[10];
-    for(thread_i = 0; thread_i<1; thread_i++) {
+    for(thread_i = 0; thread_i<10; thread_i++) {
         tid[thread_i] = thread_i;
         pthread_create(&send_tid[thread_i], NULL, send_task_thread, tid[thread_i]);
         pthread_create(&recv_tid[thread_i], NULL, recv_task_thread, tid[thread_i]);
@@ -405,7 +405,7 @@ int main(int argc, char *argv[])
 #if !DUMP_FILE
     fpga_exit_block();
 #endif
-    for(thread_i = 0; thread_i<1; thread_i++) {
+    for(thread_i = 0; thread_i<10; thread_i++) {
         pthread_join(send_tid[thread_i], NULL);
         pthread_join(recv_tid[thread_i], NULL);
     }

@@ -781,7 +781,7 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
             //fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
             
             if (ez->n_cigar > 0) {
-#if !DUMP_FILE
+#if 0
                 if (0xA0B1C2D3 == ez->revcigar) {
                     reverse_cigar(ez->n_cigar, ez->cigar);
                 }
@@ -823,7 +823,7 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                 //fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
 
                 if (ez->n_cigar > 0) {
-#if !DUMP_FILE
+#if 0
                     if (0xA0B1C2D3 == ez->revcigar) {
                         reverse_cigar(ez->n_cigar, ez->cigar);
                     }
@@ -899,7 +899,7 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                 //fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", sw_context->qlen, sw_context->tlen, sw_context->w);
                 
                 if (ez->n_cigar > 0) {
-#if !DUMP_FILE
+#if 0
                     if (0xA0B1C2D3 == ez->revcigar) {
                         reverse_cigar(ez->n_cigar, ez->cigar);
                     }
