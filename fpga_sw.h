@@ -35,6 +35,12 @@ typedef struct {
     unsigned char reserve2[4];
 }fpga_sw_task;
 
+typedef struct {
+    void* data;
+    unsigned int size;
+}task_t;
+void init_fpga_task_array();
+void stop_fpga_send_thread();
 void* send_task_thread(void* arg);
 void* recv_task_thread(void *arg);
 void stop_fpga_thread();

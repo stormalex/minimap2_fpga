@@ -360,6 +360,7 @@ int main(int argc, char *argv[])
     
     init_task_array();
     init_result_array();
+    init_fpga_task_array();
 #if 0
     pthread_t sw_tid[1];
     int thread_i = 0;
@@ -383,6 +384,8 @@ int main(int argc, char *argv[])
         pthread_create(&send_tid[thread_i], NULL, send_task_thread, (void*)tid[thread_i]);
         pthread_create(&recv_tid[thread_i], NULL, recv_task_thread, tid[thread_i]);
     }*/
+    pthread_t send_tid;
+    pthread_create(&send_tid, NULL, send_task_thread, NULL);
 #endif
     while ((mi = mm_idx_reader_read(idx_rdr, n_threads)) != 0) {
 		if ((opt.flag & MM_F_CIGAR) && (mi->flag & MM_I_NO_SEQ)) {
@@ -426,7 +429,8 @@ int main(int argc, char *argv[])
     }
 #else
     
-
+    stop_fpga_send_thread();
+    pthread_join(send_tid, NULL);
     stop_fpga_thread();
 #if !DUMP_FILE
     fpga_exit_block();

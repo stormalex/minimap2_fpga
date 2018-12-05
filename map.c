@@ -1107,17 +1107,17 @@ static void* sw_result_thread(void* arg)
             exit(0);
         }
         else {
-            char* tmp_buf = (char*)malloc(4*1024*1024);
+            /*char* tmp_buf = (char*)malloc(4*1024*1024);
             memcpy(tmp_buf, fpga_buf, fpga_len + 4096);
             fpga_release_retbuf(fpga_buf);
-            fpga_buf = tmp_buf;
+            fpga_buf = tmp_buf;*/
 
             __sync_sub_and_fetch(&g_process_task_num, 1);   //fpga任务数减1
             
             head = (fpga_task_t*)fpga_buf;
             if(head->check_id != CHECK_ID) {
-                //fpga_release_retbuf(fpga_buf);
-                free(fpga_buf);
+                fpga_release_retbuf(fpga_buf);
+                //free(fpga_buf);
                 fprintf(stderr, "head->check_id=%x, error buf\n", head->check_id);
                 continue;
             }
@@ -1159,15 +1159,15 @@ static void* sw_result_thread(void* arg)
                 ret = save_chain_result(result, params, read_num);
                 if(ret == 1) {
                     fprintf(stderr, "1.all read process complete\n");
-                    //fpga_release_retbuf(fpga_buf);
-                    free(fpga_buf);
+                    fpga_release_retbuf(fpga_buf);
+                    //free(fpga_buf);
                     //fpga_exit_block();  //唤醒所有等待的线程
                     params->exit = 0;
                     return NULL;
                 }
             }
-            //fpga_release_retbuf(fpga_buf);
-            free(fpga_buf);
+            fpga_release_retbuf(fpga_buf);
+            //free(fpga_buf);
         }
 check_soft_result:
         //检查是否有软件处理的result

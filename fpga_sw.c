@@ -504,6 +504,7 @@ static unsigned long long sw_num = 0;
 static unsigned long long ez_num = 0;
 static unsigned long long cigar_num = 0;
 
+/*
 void* send_task_thread(void* arg)
 {
     int tid = (int)arg;
@@ -705,7 +706,7 @@ void* send_task_thread(void* arg)
     free(in_file);
     free(out_file);
     return NULL;
-}
+}*/
 
 void* recv_task_thread(void *arg)
 {
@@ -800,3 +801,79 @@ void* recv_task_thread(void *arg)
     return NULL;
 }
 
+
+//保存发送任务的队列
+#define TASK_MAX    4096
+static task_t tasks[TASK_MAX];
+static pthread_mutex_t tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int tasks_head = 0;
+static int tasks_tail = 0;
+
+static int fpga_send_task_stop = 1;
+
+void init_fpga_task_array()
+{
+    memset(tasks, 0, sizeof(tasks));
+    tasks_head = 0;
+    tasks_tail = 0;
+    fpga_send_task_stop = 1;
+    return;
+}
+
+void stop_fpga_send_thread()
+{
+    fpga_send_task_stop = 0;
+}
+
+static int fpga_task_is_full()
+{
+    return ((tasks_tail + 1) % TASK_MAX == tasks_head);
+}
+static int fpga_task_is_empty()
+{
+    return (tasks_head == tasks_tail);
+}
+
+int send_fpga_task(task_t task)
+{
+    pthread_mutex_lock(&tasks_mutex);
+    if (fpga_task_is_full()) {
+        pthread_mutex_unlock(&tasks_mutex);
+        return -1;
+    }
+    tasks[tasks_tail] = task;
+    tasks_tail = (tasks_tail + 1) % TASK_MAX;
+        
+    pthread_mutex_unlock(&tasks_mutex);
+    return 0;
+}
+
+int get_fpga_task(task_t* task)
+{
+    pthread_mutex_lock(&tasks_mutex);
+    if (fpga_task_is_empty()) {
+        pthread_mutex_unlock(&tasks_mutex);
+        return 1;
+    }
+    *task = tasks[tasks_head];
+    tasks_head = (tasks_head + 1) % TASK_MAX;
+    pthread_mutex_unlock(&tasks_mutex);
+    return 0;
+}
+
+void* send_task_thread(void* arg)
+{
+    void* fpga_buf;
+    task_t task;
+    while(fpga_send_task_stop) {
+        if(get_fpga_task(&task)) {
+            continue;
+        }
+        do {
+            fpga_buf = fpga_get_writebuf(task.size, BUF_TYPE_SW);
+        }
+        while(fpga_buf == NULL);
+        memcpy(fpga_buf, task.data, task.size);
+        fpga_writebuf_submit(fpga_buf, task.size, TYPE_SW);
+    }
+}

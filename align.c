@@ -455,15 +455,17 @@ void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size, int ti
     fpga_task_t* head = NULL;
     fpga_task_id_t* chain_head = NULL;
     fpga_sw_task* sw_task = NULL;
+    task_t fpga_task;
 
     start = realtime_msec();
-retry:
+/*retry:
     fpga_buf = (char*)fpga_get_writebuf(data_size + 4096, BUF_TYPE_SW);
     if(fpga_buf == NULL) {
         goto retry;
         fprintf(stderr, "fpga_get_writebuf sw error:%s\n", strerror(errno));
         exit(0);
-    }
+    }*/
+    fpga_buf = (char*)malloc(data_size + 4096);
     end = realtime_msec();
     get_mem_time[tid] += (end - start);
 
@@ -515,7 +517,10 @@ retry:
     start = realtime_msec();
     package_time[tid] += (start - end);
     
-    fpga_writebuf_submit(fpga_buf, data_size + 4096, TYPE_SW);
+    //fpga_writebuf_submit(fpga_buf, data_size + 4096, TYPE_SW);
+    fpga_task.data = (void*)fpga_buf;
+    fpga_task.size = data_size + 4096;
+    while(send_fpga_task(fpga_task));
     
     end = realtime_msec();
     send_time[tid] += (end - start);
