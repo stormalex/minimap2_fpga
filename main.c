@@ -100,6 +100,21 @@ void init_task_array();
 void init_result_array();
 void stop_sw_thread();
 
+double chaindp_time[100];
+double step0_first = 0;
+double step0[100];
+double step1[100];
+double step2[100];
+
+double process_task_time[100];
+double get_mem_time[100];
+double package_time[100];
+double send_time[100];
+double chaindp_sw_time[100];
+double sw_time[100];
+double sw_task_time[100];
+double sw_soft_time[100];
+
 int main(int argc, char *argv[])
 {
 	const char *opt_str = "2aSDw:k:K:t:r:f:Vv:g:G:I:d:XT:s:x:Hcp:M:n:z:A:B:O:E:m:N:Qu:R:hF:LC:y";
@@ -111,6 +126,19 @@ int main(int argc, char *argv[])
 	mm_idx_reader_t *idx_rdr;
 	mm_idx_t *mi;
 
+    memset(chaindp_time, 0, sizeof(chaindp_time));
+    memset(step0, 0, sizeof(step0));
+    memset(step1, 0, sizeof(step1));
+    memset(step2, 0, sizeof(step2));
+    memset(process_task_time, 0, sizeof(process_task_time));
+    memset(get_mem_time, 0, sizeof(get_mem_time));
+    memset(package_time, 0, sizeof(package_time));
+    memset(send_time, 0, sizeof(send_time));
+    memset(chaindp_sw_time, 0, sizeof(chaindp_sw_time));
+    memset(sw_time, 0, sizeof(sw_time));
+    memset(sw_task_time, 0, sizeof(sw_task_time));
+    memset(sw_soft_time, 0, sizeof(sw_soft_time));
+    
 	mm_verbose = 3;
 	liftrlimit();
 	mm_realtime0 = realtime();
@@ -340,7 +368,7 @@ int main(int argc, char *argv[])
     }
 #else
 #if !DUMP_FILE
-    int ret = fpga_init(BLOCK);
+    int ret = fpga_init(NOBLOCK);
     if(ret) {
         printf("fpga_init failed\n");
         return -1;
@@ -420,5 +448,98 @@ int main(int argc, char *argv[])
 			fprintf(stderr, " %s", argv[i]);
 		fprintf(stderr, "\n[M::%s] Real time: %.3f sec; CPU: %.3f sec\n", __func__, realtime() - mm_realtime0, cputime());
 	}
+    fprintf(stderr, "first step 0 time:%.3f msec\n", step0_first);
+
+    double chain_sw_total = 0;
+    for(i = 0; i < sizeof(chaindp_sw_time)/sizeof(chaindp_sw_time[0]); i++) {
+        if(chaindp_sw_time[i] == 0)
+            break;
+        chain_sw_total += chaindp_sw_time[i];
+    }
+    fprintf(stderr, "chain sw total time:      %.3f msec i=%d\n", chain_sw_total/i, i);
+    
+    double chain_dp_total = 0;
+    for(i = 0; i < sizeof(chaindp_time)/sizeof(chaindp_time[0]); i++) {
+        if(chaindp_time[i] == 0)
+            break;
+        chain_dp_total += chaindp_time[i];
+    }
+    fprintf(stderr, "chain dp time:      %.3f msec i=%d\n", chain_dp_total/i, i);
+    
+    double sw_total = 0;
+    for(i = 0; i < sizeof(sw_time)/sizeof(sw_time[0]); i++) {
+        if(sw_time[i] == 0)
+            break;
+        sw_total += sw_time[i];
+    }
+    fprintf(stderr, "sw time:      %.3f msec i=%d\n", sw_total/i, i);
+    
+    double process_total = 0;
+    for(i = 0; i < sizeof(process_task_time)/sizeof(process_task_time[0]); i++) {
+        if(process_task_time[i] == 0)
+            break;
+        process_total += process_task_time[i];
+    }
+    fprintf(stderr, "process task time:      %.3f msec i=%d\n", process_total/i, i);
+    
+    double get_mem_total = 0;
+    for(i = 0; i < sizeof(get_mem_time)/sizeof(get_mem_time[0]); i++) {
+        if(get_mem_time[i] == 0)
+            break;
+        get_mem_total += get_mem_time[i];
+    }
+    fprintf(stderr, "get mem time:      %.3f msec i=%d\n", get_mem_total/i, i);
+    
+    double package_total = 0;
+    for(i = 0; i < sizeof(package_time)/sizeof(package_time[0]); i++) {
+        if(package_time[i] == 0)
+            break;
+        package_total += package_time[i];
+    }
+    fprintf(stderr, "package time:      %.3f msec i=%d\n", package_total/i, i);
+    
+    double send_total = 0;
+    for(i = 0; i < sizeof(send_time)/sizeof(send_time[0]); i++) {
+        if(send_time[i] == 0)
+            break;
+        send_total += send_time[i];
+    }
+    fprintf(stderr, "submit time:      %.3f msec i=%d\n", send_total/i, i);
+    
+    double sw_task_total = 0;
+    for(i = 0; i < sizeof(sw_task_time)/sizeof(sw_task_time[0]); i++) {
+        if(sw_task_time[i] == 0)
+            break;
+        sw_task_total += sw_task_time[i];
+    }
+    fprintf(stderr, "sw task time:      %.3f msec i=%d\n", sw_task_total/i, i);
+    
+    double sw_soft_total = 0;
+    for(i = 0; i < sizeof(sw_soft_time)/sizeof(sw_soft_time[0]); i++) {
+        if(sw_soft_time[i] == 0)
+            break;
+        sw_soft_total += sw_soft_time[i];
+    }
+    fprintf(stderr, "sw soft time:      %.3f msec i=%d\n", sw_soft_total/i, i);
+    
+    
+    fprintf(stderr, "\n\n\n");
+    for(i = 0; i < sizeof(step0)/sizeof(step0[0]); i++) {
+            if(step0[i] == 0)
+                    break;
+            fprintf(stderr, "step0 time[%d]:      %.3f msec\n", i, step0[i]);
+    }
+    fprintf(stderr, "\n");
+    for(i = 0; i < sizeof(step1)/sizeof(step1[0]); i++) {
+            if(step1[i] == 0)
+                    break;
+            fprintf(stderr, "step1 time[%d]:      %.3f msec\n", i, step1[i]);
+    }
+    fprintf(stderr, "\n");
+    for(i = 0; i < sizeof(step2)/sizeof(step2[0]); i++) {
+            if(step2[i] == 0)
+                    break;
+            fprintf(stderr, "step2 time[%d]:      %.3f msec\n", i, step2[i]);
+    }
 	return 0;
 }

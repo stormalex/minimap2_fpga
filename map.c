@@ -21,6 +21,23 @@ static void* sw_result_thread(void* arg);
 struct mm_tbuf_s {
 	void *km;
 };
+extern double chaindp_time[100];
+extern double chaindp_sw_time[100];
+extern double sw_time[100];
+
+#include <sys/time.h>
+#include<time.h>
+static double realtime_msec(void)
+{
+	/*struct timeval tp;
+	struct timezone tzp;
+	gettimeofday(&tp, &tzp);
+	return tp.tv_sec*1000 + tp.tv_usec * 1e-3;*/
+
+    struct timespec tp;
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+    return tp.tv_sec*1000 + tp.tv_nsec*1e-6;
+}
 
 mm_tbuf_t *mm_tbuf_init(void)
 {
@@ -282,6 +299,7 @@ static mm_reg1_t *align_regs_ori(const mm_mapopt_t *opt, const mm_idx_t *mi, voi
 
 void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long read_index, user_params_t* params, int tid)
 {
+    double start, end, end1;
 	int i, j, rep_len, qlen_sum, n_regs0, n_mini_pos;
 	int max_chain_gap_qry, max_chain_gap_ref, is_splice = !!(opt->flag & MM_F_SPLICE), is_sr = !!(opt->flag & MM_F_SR);
 	uint32_t hash;
@@ -292,6 +310,8 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	mm_reg1_t *regs0;
 	//km_stat_t kmst;
 
+    start = realtime_msec();
+    
 	for (i = 0, qlen_sum = 0; i < n_segs; ++i)
 		qlen_sum += qlens[i], n_regs[i] = 0, regs[i] = 0;
 
@@ -359,11 +379,14 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	chain_post(opt, max_chain_gap_ref, mi, b->km, qlen_sum, n_segs, qlens, &n_regs0, regs0, a);
 	if (!is_sr) mm_est_err(mi, qlen_sum, n_regs0, regs0, a, n_mini_pos, mini_pos);
-
+    
     kfree(b->km, mv.a);
 	kfree(b->km, u);
 	kfree(b->km, mini_pos);
 
+    end = realtime_msec();
+    chaindp_time[tid] += (end - start);
+    
 	if (n_segs == 1) { // uni-segment
         //创建read上下文并保存在全局数组中
         assert(params->read_contexts[read_index] == NULL);
@@ -413,6 +436,9 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 			b->km = km_init();
 		}
 	}*/
+    end1 = realtime_msec();
+    sw_time[tid] += (end1 - end);
+    chaindp_sw_time[tid] += (end1 - start);
 }
 
 mm_reg1_t *mm_map(const mm_idx_t *mi, int qlen, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname)
@@ -481,6 +507,7 @@ static void worker_for(void *_data, long i, int tid, void* params) // kt_for() c
 		}*/
 }
 
+
 typedef struct {
     int tid;
     user_params_t* params;
@@ -489,11 +516,27 @@ typedef struct {
 volatile int g_total_task_num = 0;       //fpga最大任务数
 volatile int g_process_task_num = 0;     //当前fpga处理的任务数
 
+static int count = 0;
+static int step0_i = 0;
+static int step1_i = 0;
+static int step2_i = 0;
+
+extern double step0_first;
+extern double step2_last;
+extern double step0[100];
+extern double step1[100];
+extern double step2[100];
+
+void last_send(void *params, int tid);
+
 static void *worker_pipeline(void *shared, int step, void *in)
 {
 	int i, j, k;
+    double start, end;
     pipeline_t *p = (pipeline_t*)shared;
     if (step == 0) { // step 0: read sequences
+        start = realtime_msec();
+        fprintf(stderr, "entry step 0\n");
 		int with_qual = (!!(p->opt->flag & MM_F_OUT_SAM) && !(p->opt->flag & MM_F_NO_QUAL));
 		int with_comment = !!(p->opt->flag & MM_F_COPY_COMMENT);
 		int frag_mode = (p->n_fp > 1 || !!(p->opt->flag & MM_F_FRAG_MODE));
@@ -518,11 +561,22 @@ static void *worker_pipeline(void *shared, int step, void *in)
 					s->seg_off[s->n_frag++] = j;
 					j = i;
 				}
+            end = realtime_msec();
+            step0[step0_i++] = end - start;
+            if(count == 0) {
+                count = 1;
+                step0_first = (end - start);
+            }
+            fprintf(stderr, "exit step 0\n");
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
         int i = 0;
         user_params_t params;
+        fprintf(stderr, "entry step 1\n");
+        
+        start = realtime_msec();
+        
         memset(&params, 0, sizeof(params));
 
         
@@ -553,7 +607,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
             params.send_task[i].chain_tasks = (chain_sw_task_t**)malloc(SEND_ARRAY_MAX * sizeof(chain_sw_task_t*));
         }
         
-        fpga_set_block();   //设置阻塞位，当处于阻塞模式时候不会退出
+        //fpga_set_block();   //设置阻塞位，当处于阻塞模式时候不会退出
+        params.exit = 1;
 
         g_total_task_num = get_queue_num();
         fprintf(stderr, "total_task_num=%d\n", g_total_task_num);
@@ -577,14 +632,22 @@ static void *worker_pipeline(void *shared, int step, void *in)
             pthread_create(&sw_tid[i], NULL, sw_result_thread, &user_args[i]);
         }
 
-		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params);
-        struct timespec start, end;
-        clock_gettime(CLOCK_MONOTONIC, &start);
+		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params, last_send);
+        
+        //发送剩余的任务到fpga
+        for(i = 0; i < p->n_threads; i++) {
+            if(params.send_task[i].num != 0) {
+                fprintf(stderr, "####[%d]send task num=%d datasize=%d\n", i, params.send_task[i].num, params.send_task[i].data_size);
+                //send_to_fpga(params.send_task[i].chain_tasks, params.send_task[i].num, params.send_task[i].data_size, i);
+            }
+        }
+        
+        double t1, t2;
+        t1 = realtime_msec();
         for(i = 0; i < 10; i++)
             pthread_join(sw_tid[i], NULL);
-        clock_gettime(CLOCK_MONOTONIC, &end);
-        fprintf(stderr, "%lu %lu\n", start.tv_sec, start.tv_nsec);
-        fprintf(stderr, "%lu %lu\n", end.tv_sec, end.tv_nsec);
+        t2 = realtime_msec();
+        fprintf(stderr, "t2-t1=%.3f msec\n", t2-t1);
 
         if(params.read_num == 0) {
             fprintf(stderr, "all read ok!\n");
@@ -596,18 +659,23 @@ static void *worker_pipeline(void *shared, int step, void *in)
         for(i = 0; i < p->n_threads; i++) {
             free(params.send_task[i].chain_tasks);
         }
-        
+
         free(params.send_task);
         free(params.read_results);
         free(params.read_is_complete);
         free(params.read_contexts);
         free(params.chain_num);
         free(params.read_flag);
+        end = realtime_msec();
+        step1[step1_i++] = end - start;
+        fprintf(stderr, "exit step 1\n");
 		return in;
     } else if (step == 2) { // step 2: output
 		void *km = 0;
         step_t *s = (step_t*)in;
 		const mm_idx_t *mi = p->mi;
+        start = realtime_msec();
+        fprintf(stderr, "entry step 2\n");
 		for (i = 0; i < p->n_threads; ++i) mm_tbuf_destroy(s->buf[i]);
 		free(s->buf);
 		if ((p->opt->flag & MM_F_OUT_CS) && !(mm_dbg_flag & MM_DBG_NO_KALLOC)) km = km_init();
@@ -640,6 +708,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		}
 		free(s->reg); free(s->n_reg); free(s->seq); // seg_off and n_seg were allocated with reg; no memory leak here
 		km_destroy(km);
+        end = realtime_msec();
+        step2[step2_i++] = end - start;
+        fprintf(stderr, "exit step 2\n");
 		if (mm_verbose >= 3)
 			fprintf(stderr, "[M::%s::%.3f*%.2f] mapped %d sequences\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), s->n_seq);
 		free(s);
@@ -649,6 +720,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 
 int mm_map_file_frag(const mm_idx_t *idx, int n_segs, const char **fn, const mm_mapopt_t *opt, int n_threads)
 {
+    double start, end;
 	int i, j, pl_threads;
 	pipeline_t pl;
 	if (n_segs < 1) return -1;
@@ -670,11 +742,14 @@ int mm_map_file_frag(const mm_idx_t *idx, int n_segs, const char **fn, const mm_
 	pl.n_threads = n_threads > 1? n_threads : 1;
 	pl.mini_batch_size = opt->mini_batch_size;
 	pl_threads = n_threads == 1? 1 : (opt->flag&MM_F_2_IO_THREADS)? 3 : 2;
+    start = realtime();
 	kt_pipeline(pl_threads, worker_pipeline, &pl, 3);
+    end = realtime();
 	free(pl.str.s);
 	for (i = 0; i < n_segs; ++i)
 		mm_bseq_close(pl.fp[i]);
 	free(pl.fp);
+    fprintf(stderr, "kt_pileline time=%.3f sec\n", end - start);
 	return 0;
 }
 
@@ -1017,86 +1092,97 @@ static void* sw_result_thread(void* arg)
     uint32_t *cigar_addr = NULL;
     long read_num = params->read_num;
 
-    while(1) {
+    while(params->exit) {
         fpga_buf = (char*)fpga_get_retbuf(&fpga_len, RET_TYPE_SW);
+        if(fpga_buf == NULL) {
+            goto check_soft_result;
+        }
         if(fpga_len == 0) {
             fprintf(stderr,"exit receive fpga result thread\n");
             return NULL;
-        }
-        if(fpga_buf == NULL) {
-            fprintf(stderr,"fpga_get_retbuf return NULL\n");
-            exit(0);
         }
         if(fpga_len > 4 * 1024 * 1024) {
             fpga_release_retbuf(fpga_buf);
             fprintf(stderr, "fpga_len=%d\n", fpga_len);
             exit(0);
         }
-
-        __sync_sub_and_fetch(&g_process_task_num, 1);   //fpga任务数减1
-        
-        head = (fpga_task_t*)fpga_buf;
-        if(head->check_id != CHECK_ID) {
+        else {
+            char* tmp_buf = (char*)malloc(4*1024*1024);
+            memcpy(tmp_buf, fpga_buf, fpga_len + 4096);
             fpga_release_retbuf(fpga_buf);
-            fprintf(stderr, "head->check_id=%x, error buf\n", head->check_id);
-            continue;
-        }
-        //fprintf(stderr, "recv:tag:%lld, chain num:%d, sw num:%d\n", head->tag, head->chain_task_num, head->sw_num);
-        int chain_num = head->chain_task_num;
-        chain_head = (fpga_task_id_t*)((char*)fpga_buf + sizeof(fpga_task_t));
-        ez_addr = (ksw_extz_t*)((char*)fpga_buf + 4096);
-        cigar_addr = (uint32_t *)((char*)ez_addr + head->sw_num * sizeof(ksw_extz_t));
+            fpga_buf = tmp_buf;
 
-        //处理每一个chain
-        for(chain_index = 0; chain_index < chain_num; chain_index++) {
-            sw_result_t* result = create_result();
-            result->read_id = chain_head[chain_index].read_id;
-            result->chain_id = chain_head[chain_index].chain_id;
-
-            for(sw_index = 0; sw_index < chain_head[chain_index].sw_num; sw_index++) {
-                
-                //生成一个ez结果
-                ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
-                *ez = *ez_addr;
-                ez->m_cigar = ez_addr->n_cigar + 1;
-                
-                
-                if(ez->n_cigar == 0) {
-                    //fprintf(stderr, "ez->n_cigar=0\n");
-                }
-                else {
-                    ez->cigar = (uint32_t *)malloc(ez->m_cigar * sizeof(uint32_t));
-                    memcpy(ez->cigar, cigar_addr, ez->n_cigar * sizeof(uint32_t));
-                }
-                
-                ez_addr += 1;   //移动ez到下一个
-
-                p = (char*)cigar_addr;
-                cigar_addr = (uint32_t *)(p + ADDR_ALIGN(ez->n_cigar*sizeof(uint32_t), 16));  //移动到下一个cigar开头
-                add_result(result, ez); //将ez结果加入到chain结果中
+            __sync_sub_and_fetch(&g_process_task_num, 1);   //fpga任务数减1
+            
+            head = (fpga_task_t*)fpga_buf;
+            if(head->check_id != CHECK_ID) {
+                //fpga_release_retbuf(fpga_buf);
+                free(fpga_buf);
+                fprintf(stderr, "head->check_id=%x, error buf\n", head->check_id);
+                continue;
             }
-          
-            ret = save_chain_result(result, params, read_num);
-            if(ret == 1) {
-                fprintf(stderr, "1.all read process complete\n");
-                fpga_exit_block();  //唤醒所有等待的线程
-            }
-        }
-        fpga_release_retbuf(fpga_buf);
+            //fprintf(stderr, "recv:tag:%lld, chain num:%d, sw num:%d\n", head->tag, head->chain_task_num, head->sw_num);
+            int chain_num = head->chain_task_num;
+            chain_head = (fpga_task_id_t*)((char*)fpga_buf + sizeof(fpga_task_t));
+            ez_addr = (ksw_extz_t*)((char*)fpga_buf + 4096);
+            cigar_addr = (uint32_t *)((char*)ez_addr + head->sw_num * sizeof(ksw_extz_t));
 
+            //处理每一个chain
+            for(chain_index = 0; chain_index < chain_num; chain_index++) {
+                sw_result_t* result = create_result();
+                result->read_id = chain_head[chain_index].read_id;
+                result->chain_id = chain_head[chain_index].chain_id;
+
+                for(sw_index = 0; sw_index < chain_head[chain_index].sw_num; sw_index++) {
+                    
+                    //生成一个ez结果
+                    ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
+                    *ez = *ez_addr;
+                    ez->m_cigar = ez_addr->n_cigar + 1;
+                    
+                    
+                    if(ez->n_cigar == 0) {
+                        //fprintf(stderr, "ez->n_cigar=0\n");
+                    }
+                    else {
+                        ez->cigar = (uint32_t *)malloc(ez->m_cigar * sizeof(uint32_t));
+                        memcpy(ez->cigar, cigar_addr, ez->n_cigar * sizeof(uint32_t));
+                    }
+                    
+                    ez_addr += 1;   //移动ez到下一个
+
+                    p = (char*)cigar_addr;
+                    cigar_addr = (uint32_t *)(p + ADDR_ALIGN(ez->n_cigar*sizeof(uint32_t), 16));  //移动到下一个cigar开头
+                    add_result(result, ez); //将ez结果加入到chain结果中
+                }
+              
+                ret = save_chain_result(result, params, read_num);
+                if(ret == 1) {
+                    fprintf(stderr, "1.all read process complete\n");
+                    //fpga_release_retbuf(fpga_buf);
+                    free(fpga_buf);
+                    //fpga_exit_block();  //唤醒所有等待的线程
+                    params->exit = 0;
+                    return NULL;
+                }
+            }
+            //fpga_release_retbuf(fpga_buf);
+            free(fpga_buf);
+        }
+check_soft_result:
         //检查是否有软件处理的result
-        while(1) {
+        {
             sw_result_t* result = get_result();
-            if(result == NULL) {
-                break;
+            if(result != NULL) {
+                ret = save_chain_result(result, params, read_num);
+                if(ret == 1) {
+                    fprintf(stderr, "2.all read process complete\n");
+                    fpga_exit_block();  //唤醒所有等待的线程
+                    params->exit = 0;
+                    return NULL;
+                }
             }
-            ret = save_chain_result(result, params, read_num);
-            if(ret == 1) {
-                fprintf(stderr, "2.all read process complete\n");
-                fpga_exit_block();  //唤醒所有等待的线程
-                break;
-            }
-        }
+        }   
     }
     return NULL;
 }

@@ -151,7 +151,8 @@ typedef struct mm_tbuf_s mm_tbuf_t;
 
 #include "soft_sw.h"
 typedef struct {
-    long read_num;
+    long num;                           //read的总数，不会变
+    long read_num;                      //read的总数，会变
     unsigned long zero_seed_num;        //seed为0的read数量
     int* chain_num;                     //记录每条read有多少条chain
     char* read_flag;                    //记录该条read是需要加chain的read，软件来做，其他的结果忽略
