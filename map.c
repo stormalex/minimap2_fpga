@@ -24,7 +24,8 @@ struct mm_tbuf_s {
 extern double chaindp_time[100];
 extern double chaindp_sw_time[100];
 extern double sw_time[100];
-
+extern double create_time;
+extern double mem_init_time;
 #include <sys/time.h>
 #include<time.h>
 static double realtime_msec(void)
@@ -528,11 +529,12 @@ extern double step1[100];
 extern double step2[100];
 
 void last_send(void *params, int tid);
+void* soft_sw_result_thread(void* arg);
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
 	int i, j, k;
-    double start, end;
+    double start, end, t1, t2;
     pipeline_t *p = (pipeline_t*)shared;
     if (step == 0) { // step 0: read sequences
         start = realtime_msec();
@@ -607,7 +609,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
             params.send_task[i].chain_tasks = (chain_sw_task_t**)malloc(SEND_ARRAY_MAX * sizeof(chain_sw_task_t*));
         }
         
-        //fpga_set_block();   //设置阻塞位，当处于阻塞模式时候不会退出
+        t1 = realtime_msec();
+        
+        fpga_set_block();   //设置阻塞位，当处于阻塞模式时候不会退出
         params.exit = 1;
 
         g_total_task_num = get_queue_num();
@@ -631,7 +635,14 @@ static void *worker_pipeline(void *shared, int step, void *in)
             user_args[i].params = &params;
             pthread_create(&sw_tid[i], NULL, sw_result_thread, &user_args[i]);
         }
+        
+        pthread_t soft_sw_tid;
+        pthread_create(&soft_sw_tid, NULL, soft_sw_result_thread, &params);
 
+        t2 = realtime_msec();
+        mem_init_time += (t2 - start);
+        create_time += (t2 - t1);
+        
 		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params, last_send);
         
         //发送剩余的任务到fpga
@@ -642,12 +653,13 @@ static void *worker_pipeline(void *shared, int step, void *in)
             }
         }
         
-        double t1, t2;
-        t1 = realtime_msec();
+        double t3, t4;
+        t3 = realtime_msec();
+        pthread_join(soft_sw_tid, NULL);
         for(i = 0; i < 10; i++)
             pthread_join(sw_tid[i], NULL);
-        t2 = realtime_msec();
-        fprintf(stderr, "t2-t1=%.3f msec\n", t2-t1);
+        t4 = realtime_msec();
+        fprintf(stderr, "t2-t1=%.3f msec\n", t4-t3);
 
         if(params.read_num == 0) {
             fprintf(stderr, "all read ok!\n");
@@ -1095,7 +1107,8 @@ static void* sw_result_thread(void* arg)
     while(params->exit) {
         fpga_buf = (char*)fpga_get_retbuf(&fpga_len, RET_TYPE_SW);
         if(fpga_buf == NULL) {
-            goto check_soft_result;
+            fprintf(stderr,"fpga_get_retbuf return NULL\n");
+            exit(1);
         }
         if(fpga_len == 0) {
             fprintf(stderr,"exit receive fpga result thread\n");
@@ -1106,83 +1119,92 @@ static void* sw_result_thread(void* arg)
             fprintf(stderr, "fpga_len=%d\n", fpga_len);
             exit(0);
         }
-        else {
-            /*char* tmp_buf = (char*)malloc(4*1024*1024);
-            memcpy(tmp_buf, fpga_buf, fpga_len + 4096);
-            fpga_release_retbuf(fpga_buf);
-            fpga_buf = tmp_buf;*/
+        
+        /*char* tmp_buf = (char*)malloc(4*1024*1024);
+        memcpy(tmp_buf, fpga_buf, fpga_len + 4096);
+        fpga_release_retbuf(fpga_buf);
+        fpga_buf = tmp_buf;*/
 
-            __sync_sub_and_fetch(&g_process_task_num, 1);   //fpga任务数减1
-            
-            head = (fpga_task_t*)fpga_buf;
-            if(head->check_id != CHECK_ID) {
-                fpga_release_retbuf(fpga_buf);
-                //free(fpga_buf);
-                fprintf(stderr, "head->check_id=%x, error buf\n", head->check_id);
-                continue;
-            }
-            //fprintf(stderr, "recv:tag:%lld, chain num:%d, sw num:%d\n", head->tag, head->chain_task_num, head->sw_num);
-            int chain_num = head->chain_task_num;
-            chain_head = (fpga_task_id_t*)((char*)fpga_buf + sizeof(fpga_task_t));
-            ez_addr = (ksw_extz_t*)((char*)fpga_buf + 4096);
-            cigar_addr = (uint32_t *)((char*)ez_addr + head->sw_num * sizeof(ksw_extz_t));
-
-            //处理每一个chain
-            for(chain_index = 0; chain_index < chain_num; chain_index++) {
-                sw_result_t* result = create_result();
-                result->read_id = chain_head[chain_index].read_id;
-                result->chain_id = chain_head[chain_index].chain_id;
-
-                for(sw_index = 0; sw_index < chain_head[chain_index].sw_num; sw_index++) {
-                    
-                    //生成一个ez结果
-                    ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
-                    *ez = *ez_addr;
-                    ez->m_cigar = ez_addr->n_cigar + 1;
-                    
-                    
-                    if(ez->n_cigar == 0) {
-                        //fprintf(stderr, "ez->n_cigar=0\n");
-                    }
-                    else {
-                        ez->cigar = (uint32_t *)malloc(ez->m_cigar * sizeof(uint32_t));
-                        memcpy(ez->cigar, cigar_addr, ez->n_cigar * sizeof(uint32_t));
-                    }
-                    
-                    ez_addr += 1;   //移动ez到下一个
-
-                    p = (char*)cigar_addr;
-                    cigar_addr = (uint32_t *)(p + ADDR_ALIGN(ez->n_cigar*sizeof(uint32_t), 16));  //移动到下一个cigar开头
-                    add_result(result, ez); //将ez结果加入到chain结果中
-                }
-              
-                ret = save_chain_result(result, params, read_num);
-                if(ret == 1) {
-                    fprintf(stderr, "1.all read process complete\n");
-                    fpga_release_retbuf(fpga_buf);
-                    //free(fpga_buf);
-                    //fpga_exit_block();  //唤醒所有等待的线程
-                    params->exit = 0;
-                    return NULL;
-                }
-            }
+        __sync_sub_and_fetch(&g_process_task_num, 1);   //fpga任务数减1
+        
+        head = (fpga_task_t*)fpga_buf;
+        if(head->check_id != CHECK_ID) {
             fpga_release_retbuf(fpga_buf);
             //free(fpga_buf);
+            fprintf(stderr, "head->check_id=%x, error buf\n", head->check_id);
+            continue;
         }
-check_soft_result:
-        //检查是否有软件处理的result
-        {
-            sw_result_t* result = get_result();
-            if(result != NULL) {
-                ret = save_chain_result(result, params, read_num);
-                if(ret == 1) {
-                    fprintf(stderr, "2.all read process complete\n");
-                    fpga_exit_block();  //唤醒所有等待的线程
-                    params->exit = 0;
-                    return NULL;
+        //fprintf(stderr, "recv:tag:%lld, chain num:%d, sw num:%d\n", head->tag, head->chain_task_num, head->sw_num);
+        int chain_num = head->chain_task_num;
+        chain_head = (fpga_task_id_t*)((char*)fpga_buf + sizeof(fpga_task_t));
+        ez_addr = (ksw_extz_t*)((char*)fpga_buf + 4096);
+        cigar_addr = (uint32_t *)((char*)ez_addr + head->sw_num * sizeof(ksw_extz_t));
+
+        //处理每一个chain
+        for(chain_index = 0; chain_index < chain_num; chain_index++) {
+            sw_result_t* result = create_result();
+            result->read_id = chain_head[chain_index].read_id;
+            result->chain_id = chain_head[chain_index].chain_id;
+
+            for(sw_index = 0; sw_index < chain_head[chain_index].sw_num; sw_index++) {
+                
+                //生成一个ez结果
+                ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
+                *ez = *ez_addr;
+                ez->m_cigar = ez_addr->n_cigar + 1;
+                
+                
+                if(ez->n_cigar == 0) {
+                    //fprintf(stderr, "ez->n_cigar=0\n");
                 }
+                else {
+                    ez->cigar = (uint32_t *)malloc(ez->m_cigar * sizeof(uint32_t));
+                    memcpy(ez->cigar, cigar_addr, ez->n_cigar * sizeof(uint32_t));
+                }
+                
+                ez_addr += 1;   //移动ez到下一个
+
+                p = (char*)cigar_addr;
+                cigar_addr = (uint32_t *)(p + ADDR_ALIGN(ez->n_cigar*sizeof(uint32_t), 16));  //移动到下一个cigar开头
+                add_result(result, ez); //将ez结果加入到chain结果中
             }
-        }   
+          
+            ret = save_chain_result(result, params, read_num);
+            if(ret == 1) {
+                fprintf(stderr, "1.all read process complete\n");
+                fpga_release_retbuf(fpga_buf);
+                //free(fpga_buf);
+                params->exit = 0;
+                fpga_exit_block();  //唤醒所有等待的线程
+                
+                return NULL;
+            }
+        }
+        fpga_release_retbuf(fpga_buf);
+        //free(fpga_buf);
+    }
+    return NULL;
+}
+
+void* soft_sw_result_thread(void* arg)
+{
+    int ret = 0;
+    user_params_t *params = (user_params_t *)arg;
+    sw_result_t* result = NULL;
+    long read_num = params->read_num;
+    
+    while(params->exit) {
+        result = get_result();
+        if(result == NULL) {
+            continue;
+        }
+        ret = save_chain_result(result, params, read_num);
+        if(ret == 1) {
+            fprintf(stderr, "2.all read process complete\n");
+            params->exit = 0;
+            fpga_exit_block();  //唤醒所有等待的线程
+            return NULL;
+        }
     }
     return NULL;
 }

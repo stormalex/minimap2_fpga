@@ -44,5 +44,6 @@ void stop_fpga_send_thread();
 void* send_task_thread(void* arg);
 void* recv_task_thread(void *arg);
 void stop_fpga_thread();
+int send_fpga_task(task_t task);
 
 #endif //__FPGA_SW_H__

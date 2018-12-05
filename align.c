@@ -538,7 +538,7 @@ void last_send(void *data, int tid)
     int chain_num = params->send_task[tid].num;
     int data_size = params->send_task[tid].data_size;
 
-    fprintf(stderr, "last send, num=%d, tid=%d\n", chain_num, tid);
+    //fprintf(stderr, "last send, num=%d, tid=%d\n", chain_num, tid);
     
     if(chain_num == 0) {
         return;

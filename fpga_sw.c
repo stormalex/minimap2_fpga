@@ -869,10 +869,11 @@ void* send_task_thread(void* arg)
         if(get_fpga_task(&task)) {
             continue;
         }
-        do {
-            fpga_buf = fpga_get_writebuf(task.size, BUF_TYPE_SW);
+        fpga_buf = fpga_get_writebuf(task.size, BUF_TYPE_SW);
+        if(fpga_buf == NULL) {
+            fprintf(stderr, "fpga_get_writebuf return NULL\n");
+            exit(1);
         }
-        while(fpga_buf == NULL);
         memcpy(fpga_buf, task.data, task.size);
         fpga_writebuf_submit(fpga_buf, task.size, TYPE_SW);
     }

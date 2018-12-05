@@ -114,6 +114,8 @@ double chaindp_sw_time[100];
 double sw_time[100];
 double sw_task_time[100];
 double sw_soft_time[100];
+double create_time;
+double mem_init_time;
 
 int main(int argc, char *argv[])
 {
@@ -126,6 +128,7 @@ int main(int argc, char *argv[])
 	mm_idx_reader_t *idx_rdr;
 	mm_idx_t *mi;
 
+    create_time = 0;
     memset(chaindp_time, 0, sizeof(chaindp_time));
     memset(step0, 0, sizeof(step0));
     memset(step1, 0, sizeof(step1));
@@ -369,7 +372,7 @@ int main(int argc, char *argv[])
     }
 #else
 #if !DUMP_FILE
-    int ret = fpga_init(NOBLOCK);
+    int ret = fpga_init(BLOCK);
     if(ret) {
         printf("fpga_init failed\n");
         return -1;
@@ -526,6 +529,8 @@ int main(int argc, char *argv[])
     }
     fprintf(stderr, "sw soft time:      %.3f msec i=%d\n", sw_soft_total/i, i);
     
+    fprintf(stderr, "mem init time:           %.3f msec\n", mem_init_time);
+    fprintf(stderr, "create thread time:      %.3f msec\n", create_time);
     
     fprintf(stderr, "\n\n\n");
     for(i = 0; i < sizeof(step0)/sizeof(step0[0]); i++) {
