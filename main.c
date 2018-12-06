@@ -117,6 +117,11 @@ double sw_soft_time[100];
 double create_time;
 double mem_init_time;
 
+double chaindp_1[100];
+double chaindp_2[100];
+double chaindp_3[100];
+double chaindp_4[100];
+
 int main(int argc, char *argv[])
 {
 	const char *opt_str = "2aSDw:k:K:t:r:f:Vv:g:G:I:d:XT:s:x:Hcp:M:n:z:A:B:O:E:m:N:Qu:R:hF:LC:y";
@@ -141,6 +146,10 @@ int main(int argc, char *argv[])
     memset(sw_time, 0, sizeof(sw_time));
     memset(sw_task_time, 0, sizeof(sw_task_time));
     memset(sw_soft_time, 0, sizeof(sw_soft_time));
+    memset(chaindp_1, 0, sizeof(chaindp_1));
+    memset(chaindp_2, 0, sizeof(chaindp_2));
+    memset(chaindp_3, 0, sizeof(chaindp_3));
+    memset(chaindp_4, 0, sizeof(chaindp_4));
     
 	mm_verbose = 3;
 	liftrlimit();
@@ -471,7 +480,43 @@ int main(int argc, char *argv[])
             break;
         chain_dp_total += chaindp_time[i];
     }
-    fprintf(stderr, "chain dp time:      %.3f msec i=%d\n", chain_dp_total/i, i);
+    fprintf(stderr, "chain dp time:      %.3f msec i=%d chain_dp_total=%.3f\n", chain_dp_total/i, i, chain_dp_total);
+    
+    //chaindp 1
+    double chaindp_1_total = 0;
+    for(i = 0; i < sizeof(chaindp_1)/sizeof(chaindp_1[0]); i++) {
+        if(chaindp_1[i] == 0)
+            break;
+        chaindp_1_total += chaindp_1[i];
+    }
+    fprintf(stderr, "chain dp 1 time:      %.3f msec i=%d\n", chaindp_1_total/i, i);
+    
+    //chaindp 2
+    double chaindp_2_total = 0;
+    for(i = 0; i < sizeof(chaindp_2)/sizeof(chaindp_2[0]); i++) {
+        if(chaindp_2[i] == 0)
+            break;
+        chaindp_2_total += chaindp_2[i];
+    }
+    fprintf(stderr, "chain dp 2 time:      %.3f msec i=%d\n", chaindp_2_total/i, i);
+    
+    //chaindp 3
+    double chaindp_3_total = 0;
+    for(i = 0; i < sizeof(chaindp_3)/sizeof(chaindp_3[0]); i++) {
+        if(chaindp_3[i] == 0)
+            break;
+        chaindp_3_total += chaindp_3[i];
+    }
+    fprintf(stderr, "chain dp 3 time:      %.3f msec i=%d\n", chaindp_3_total/i, i);
+    
+    //chaindp 4
+    double chaindp_4_total = 0;
+    for(i = 0; i < sizeof(chaindp_4)/sizeof(chaindp_4[0]); i++) {
+        if(chaindp_4[i] == 0)
+            break;
+        chaindp_4_total += chaindp_4[i];
+    }
+    fprintf(stderr, "chain dp 4 time:      %.3f msec i=%d\n", chaindp_4_total/i, i);
     
     double sw_total = 0;
     for(i = 0; i < sizeof(sw_time)/sizeof(sw_time[0]); i++) {

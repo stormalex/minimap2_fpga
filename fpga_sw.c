@@ -876,5 +876,6 @@ void* send_task_thread(void* arg)
         }
         memcpy(fpga_buf, task.data, task.size);
         fpga_writebuf_submit(fpga_buf, task.size, TYPE_SW);
+        free(task.data);
     }
 }

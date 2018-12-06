@@ -26,6 +26,10 @@ extern double chaindp_sw_time[100];
 extern double sw_time[100];
 extern double create_time;
 extern double mem_init_time;
+extern double chaindp_1[100];
+extern double chaindp_2[100];
+extern double chaindp_3[100];
+extern double chaindp_4[100];
 #include <sys/time.h>
 #include<time.h>
 static double realtime_msec(void)
@@ -300,7 +304,7 @@ static mm_reg1_t *align_regs_ori(const mm_mapopt_t *opt, const mm_idx_t *mi, voi
 
 void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long read_index, user_params_t* params, int tid)
 {
-    double start, end, end1;
+    double start, end, end1, t1, t2, t3;
 	int i, j, rep_len, qlen_sum, n_regs0, n_mini_pos;
 	int max_chain_gap_qry, max_chain_gap_ref, is_splice = !!(opt->flag & MM_F_SPLICE), is_sr = !!(opt->flag & MM_F_SR);
 	uint32_t hash;
@@ -326,6 +330,9 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	if (opt->flag & MM_F_HEAP_SORT) a = collect_seed_hits_heap(b->km, opt, opt->mid_occ, mi, qname, &mv, qlen_sum, &n_a, &rep_len, &n_mini_pos, &mini_pos);
 	else a = collect_seed_hits(b->km, opt, opt->mid_occ, mi, qname, &mv, qlen_sum, &n_a, &rep_len, &n_mini_pos, &mini_pos);
 
+    t1 = realtime_msec();
+    chaindp_1[tid] += (t1 - start);
+    
 	if (mm_dbg_flag & MM_DBG_PRINT_SEED) {
 		fprintf(stderr, "RS\t%d\n", rep_len);
 		for (i = 0; i < n_a; ++i)
@@ -346,6 +353,9 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	a = mm_chain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->min_cnt, opt->min_chain_score, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 
+    t2 = realtime_msec();
+    chaindp_2[tid] += (t2 - t1);
+    
 	if (opt->max_occ > opt->mid_occ && rep_len > 0) {
 		int rechain = 0;
 		if (n_regs0 > 0) { // test if the best chain has all the segments
@@ -372,6 +382,9 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	regs0 = mm_gen_regs(b->km, hash, qlen_sum, n_regs0, u, a);
 
+    t3 = realtime_msec();
+    chaindp_3[tid] += (t3 - t2);
+    
 	if (mm_dbg_flag & MM_DBG_PRINT_SEED)
 		for (j = 0; j < n_regs0; ++j)
 			for (i = regs0[j].as; i < regs0[j].as + regs0[j].cnt; ++i)
@@ -386,6 +399,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	kfree(b->km, mini_pos);
 
     end = realtime_msec();
+    chaindp_4[tid] += (end - t3);
     chaindp_time[tid] += (end - start);
     
 	if (n_segs == 1) { // uni-segment
@@ -628,12 +642,13 @@ static void *worker_pipeline(void *shared, int step, void *in)
         init_result_array();
 
         //TODO 处理结果的线程
-        user_args_t user_args[10];
-        pthread_t sw_tid[10];
-        for(i = 0; i < 10; i++) {
+        user_args_t user_args[8];
+        pthread_t sw_tid[8];
+        for(i = 0; i < 8; i++) {
             user_args[i].tid = i;
             user_args[i].params = &params;
-            pthread_create(&sw_tid[i], NULL, sw_result_thread, &user_args[i]);
+            //pthread_create(&sw_tid[i], NULL, sw_result_thread, &user_args[i]);
+            pthread_create(&sw_tid[i], NULL, sw_result_thread, &params);
         }
         
         pthread_t soft_sw_tid;
@@ -643,20 +658,12 @@ static void *worker_pipeline(void *shared, int step, void *in)
         mem_init_time += (t2 - start);
         create_time += (t2 - t1);
         
-		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params, last_send);
-        
-        //发送剩余的任务到fpga
-        for(i = 0; i < p->n_threads; i++) {
-            if(params.send_task[i].num != 0) {
-                fprintf(stderr, "####[%d]send task num=%d datasize=%d\n", i, params.send_task[i].num, params.send_task[i].data_size);
-                //send_to_fpga(params.send_task[i].chain_tasks, params.send_task[i].num, params.send_task[i].data_size, i);
-            }
-        }
+		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params, last_send, sw_result_thread);
         
         double t3, t4;
         t3 = realtime_msec();
         pthread_join(soft_sw_tid, NULL);
-        for(i = 0; i < 10; i++)
+        for(i = 0; i < 8; i++)
             pthread_join(sw_tid[i], NULL);
         t4 = realtime_msec();
         fprintf(stderr, "t2-t1=%.3f msec\n", t4-t3);
@@ -1090,8 +1097,9 @@ int save_chain_result(sw_result_t* result, user_params_t* params, long read_num)
 static void* sw_result_thread(void* arg)
 {
     int ret = 0;
-    user_args_t* args = (user_args_t*)arg;
-    user_params_t *params = args->params;
+    //user_args_t* args = (user_args_t*)arg;
+    //user_params_t *params = args->params;
+    user_params_t *params = (user_params_t*)arg;
 
     char* fpga_buf = NULL;
     int fpga_len;

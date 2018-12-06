@@ -41,6 +41,7 @@ typedef struct kt_for_map_t {
 	void (*func)(void*,long,int,void*);
 	void *data;
     void (*last_func)(void*, int);
+    void* (*extra_func)(void*);
 } kt_for_map_t;
 
 static inline long steal_work(kt_for_t *t)
@@ -93,6 +94,10 @@ static void *ktf_worker_map(void *data)
     tid = w - w->t->w;
     w->t->last_func(w->params, tid);
     
+    if(w->t->extra_func != NULL) {
+        w->t->extra_func(w->params);
+    }
+    
 	pthread_exit(0);
 }
 
@@ -116,7 +121,7 @@ void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
 	}
 }
 
-void kt_for_map(int n_threads, void (*func)(void*,long,int,void*), void *data, long n, void* params, void (*last_func)(void*, int))
+void kt_for_map(int n_threads, void (*func)(void*,long,int,void*), void *data, long n, void* params, void (*last_func)(void*, int), void* (*extra_func)(void*))
 {
 	if (n_threads > 1) {
 		int i;
@@ -124,6 +129,7 @@ void kt_for_map(int n_threads, void (*func)(void*,long,int,void*), void *data, l
 		pthread_t *tid;
 		t.func = func, t.data = data, t.n_threads = n_threads, t.n = n;
         t.last_func = last_func;
+        t.extra_func = extra_func;
 		t.w = (ktf_worker_map_t*)calloc(n_threads, sizeof(ktf_worker_map_t));
 		tid = (pthread_t*)calloc(n_threads, sizeof(pthread_t));
 		for (i = 0; i < n_threads; ++i) {

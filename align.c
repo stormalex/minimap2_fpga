@@ -528,7 +528,7 @@ void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size, int ti
 
 void last_send(void *data, int tid)
 {
-    user_params_t*params = (user_params_t*)data;
+    user_params_t* params = (user_params_t*)data;
     char* fpga_buf = NULL;
     char* p = NULL;
     fpga_task_t* head = NULL;

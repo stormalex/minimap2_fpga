@@ -388,8 +388,17 @@ void add_sw_context(chain_context_t* chain_context, sw_context_t* sw_context)
 
 void destroy_sw_context(sw_context_t* sw_context)
 {
-    if(sw_context != NULL)
+    if(sw_context != NULL) {
+        if(sw_context->query != NULL) {
+            free(sw_context->query);
+            sw_context->query = NULL;
+        }
+        if(sw_context->target != NULL) {
+            free(sw_context->target);
+            sw_context->target = NULL;
+        }
         free(sw_context);
+    }
 }
 
 void destroy_chain_context(chain_context_t* chain_context)
@@ -398,11 +407,16 @@ void destroy_chain_context(chain_context_t* chain_context)
         int i = 0;
         for(i = 0; i < chain_context->sw_num; i++) {
             destroy_sw_context(chain_context->sw_contexts[i]);
+            chain_context->sw_contexts[i] = NULL;
         }
-        if(chain_context->tseq)
+        if(chain_context->tseq) {
             free(chain_context->tseq);
-        if(chain_context->qseq0[0])
+            chain_context->tseq = NULL;
+        }
+        if(chain_context->qseq0[0]) {
             free(chain_context->qseq0[0]);
+            chain_context->qseq0[0] = NULL;
+        }
     }
 }
 
