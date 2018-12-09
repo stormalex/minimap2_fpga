@@ -4,6 +4,8 @@
 #include <math.h>
 #include <pthread.h>
 #include <errno.h>
+#include <unistd.h>
+
 #include "minimap.h"
 #include "mmpriv.h"
 #include "ksw2.h"
@@ -520,7 +522,9 @@ void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size, int ti
     //fpga_writebuf_submit(fpga_buf, data_size + 4096, TYPE_SW);
     fpga_task.data = (void*)fpga_buf;
     fpga_task.size = data_size + 4096;
-    while(send_fpga_task(fpga_task));
+    while(send_fpga_task(fpga_task)) {
+        usleep(500);
+    }
     
     end = realtime_msec();
     send_time[tid] += (end - start);
@@ -537,6 +541,7 @@ void last_send(void *data, int tid)
     chain_sw_task_t** tasks = params->send_task[tid].chain_tasks;
     int chain_num = params->send_task[tid].num;
     int data_size = params->send_task[tid].data_size;
+    task_t fpga_task;
 
     //fprintf(stderr, "last send, num=%d, tid=%d\n", chain_num, tid);
     
@@ -544,13 +549,14 @@ void last_send(void *data, int tid)
         return;
     }
     
-retry_last:
+/*retry_last:
     fpga_buf = (char*)fpga_get_writebuf(data_size + 4096, BUF_TYPE_SW);
     if(fpga_buf == NULL) {
         goto retry_last;
         fprintf(stderr, "fpga_get_writebuf sw error:%s\n", strerror(errno));
         exit(0);
-    }
+    }*/
+    fpga_buf = (char*)malloc(data_size + 4096);
 
     head = (fpga_task_t*)fpga_buf;        //指向buff首地址
     head->check_id = CHECK_ID;
@@ -597,7 +603,12 @@ retry_last:
 
     assert((data_size + 4096) == ((char*)sw_task - fpga_buf));
 
-    fpga_writebuf_submit(fpga_buf, data_size + 4096, TYPE_SW);
+    //fpga_writebuf_submit(fpga_buf, data_size + 4096, TYPE_SW);
+    fpga_task.data = (void*)fpga_buf;
+    fpga_task.size = data_size + 4096;
+    while(send_fpga_task(fpga_task)) {
+        usleep(500);
+    }
     
     params->send_task[tid].num = 0;
 }
@@ -615,30 +626,42 @@ extern volatile int g_process_task_num;
 
 void process_task(send_task_t* send_task, chain_sw_task_t* task, int tid, long read_index, const long read_num)
 {
-    if(send_task->num == SEND_ARRAY_MAX) {
+    /*if(send_task->num == SEND_ARRAY_MAX) {
         send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size, tid);
         __sync_add_and_fetch(&g_process_task_num, 1);
         send_task->num = 0;
         send_task->data_size = 0;
-    }
+    }*/
     
     send_task->chain_tasks[send_task->num++] = task;
     send_task->data_size += task->data_size;
-
-    if(g_process_task_num < (g_total_task_num/2)) {     //如果任务是总任务的一半以下，则立即发送任务
+    
+    if(send_task->num > 64 && send_task->data_size < 6144000) {
         send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size, tid);
         __sync_add_and_fetch(&g_process_task_num, 1);
         send_task->num = 0;
         send_task->data_size = 0;
     }
-    else if(g_process_task_num >= (g_total_task_num/2)) {
-        if(send_task->num > 16) {
+    else if(send_task->num > 200 && send_task->data_size >= 6144000) {
+        fprintf(stderr, "too much task, num:%d, size:%d\n", send_task->num, send_task->data_size);
+    }
+
+    /*if(g_process_task_num < (g_total_task_num/2)) {     //如果任务是总任务的一半以下，则立即发送任务
+        if(send_task->num > 32) {
             send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size, tid);
             __sync_add_and_fetch(&g_process_task_num, 1);
             send_task->num = 0;
             send_task->data_size = 0;
         }
     }
+    else if(g_process_task_num >= (g_total_task_num/2)) {
+        if(send_task->num < 32) {
+            send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size, tid);
+            __sync_add_and_fetch(&g_process_task_num, 1);
+            send_task->num = 0;
+            send_task->data_size = 0;
+        }
+    }*/
     return;
 }
 
@@ -769,7 +792,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
     //创建一个chain的sw任务
     int small;
     chain_sw_task_t* chain_task = create_chain_sw_task(read_index, chain_index);
-    context->tseq = tseq;
+    //context->tseq = tseq;
 
     memcpy(context->mat, mat, sizeof(context->mat));
 

@@ -1,6 +1,8 @@
 #ifndef __FPGA_H__
 #define __FPGA_H__
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 
 extern "C"{
@@ -15,7 +17,12 @@ extern "C"{
 
 #define TYPE_SW 0
 #define TYPE_CD 1
-#define TYPE_CS 2
+#define TYPE_CS 3
+
+#define TYPE_INDEX_B 4
+#define TYPE_INDEX_H 5
+#define TYPE_INDEX_V 6
+#define TYPE_INDEX_P 7
 
 typedef enum {
     BUF_TYPE_SW = 0,
@@ -51,6 +58,12 @@ int get_queue_num();
 void fpga_set_params(int bw, int is_cdna, int max_skip, int min_sc, int flag, int max_occ);
 
 void fpga_test(void);
+
+uint64_t fpga_read_reg(int reg);
+void fpga_write_reg(uint64_t val, int reg);
+
+unsigned long long fpga_virt_to_phy(void* virt_addr);
+unsigned long long fpga_phy_to_virt(unsigned long long phy_addr);
 
 #ifdef __cplusplus
 

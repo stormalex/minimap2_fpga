@@ -39,11 +39,20 @@ typedef struct {
     void* data;
     unsigned int size;
 }task_t;
+typedef struct {
+    void* data;
+    unsigned int size;
+}result_t;
 void init_fpga_task_array();
 void stop_fpga_send_thread();
 void* send_task_thread(void* arg);
-void* recv_task_thread(void *arg);
 void stop_fpga_thread();
 int send_fpga_task(task_t task);
 
+
+void init_fpga_result_array();
+void stop_fpga_recv_thread();
+int send_fpga_result(result_t result);
+int get_fpga_result(result_t* result);
+void* recv_task_thread(void* arg);
 #endif //__FPGA_SW_H__

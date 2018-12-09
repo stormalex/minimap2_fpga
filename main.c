@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include "bseq.h"
 #include "minimap.h"
 #include "mmpriv.h"
@@ -122,6 +123,12 @@ double chaindp_2[100];
 double chaindp_3[100];
 double chaindp_4[100];
 
+double multi_thread_time[100];
+
+double fun_1_time[100];
+double fun_2_time[100];
+double fun_3_time[100];
+
 int main(int argc, char *argv[])
 {
 	const char *opt_str = "2aSDw:k:K:t:r:f:Vv:g:G:I:d:XT:s:x:Hcp:M:n:z:A:B:O:E:m:N:Qu:R:hF:LC:y";
@@ -150,6 +157,10 @@ int main(int argc, char *argv[])
     memset(chaindp_2, 0, sizeof(chaindp_2));
     memset(chaindp_3, 0, sizeof(chaindp_3));
     memset(chaindp_4, 0, sizeof(chaindp_4));
+    memset(multi_thread_time, 0, sizeof(multi_thread_time));
+    memset(fun_1_time, 0, sizeof(fun_1_time));
+    memset(fun_2_time, 0, sizeof(fun_2_time));
+    memset(fun_3_time, 0, sizeof(fun_3_time));
     
 	mm_verbose = 3;
 	liftrlimit();
@@ -373,6 +384,7 @@ int main(int argc, char *argv[])
     init_task_array();
     init_result_array();
     init_fpga_task_array();
+    init_fpga_result_array();
 #if 0
     pthread_t sw_tid[1];
     int thread_i = 0;
@@ -396,8 +408,20 @@ int main(int argc, char *argv[])
         pthread_create(&send_tid[thread_i], NULL, send_task_thread, (void*)tid[thread_i]);
         pthread_create(&recv_tid[thread_i], NULL, recv_task_thread, tid[thread_i]);
     }*/
-    pthread_t send_tid;
+    
+    /*sleep(3);
+    uint64_t version;
+    int count = 10;
+    while(count--) {
+        version = fpga_read_reg(0);
+        fprintf(stderr, "version = 0x%016lx\n", version);
+    }
+    exit(1);*/
+    
+    fpga_set_block();
+    pthread_t send_tid, recv_tid;
     pthread_create(&send_tid, NULL, send_task_thread, NULL);
+    pthread_create(&recv_tid, NULL, recv_task_thread, NULL);
 #endif
     while ((mi = mm_idx_reader_read(idx_rdr, n_threads)) != 0) {
 		if ((opt.flag & MM_F_CIGAR) && (mi->flag & MM_I_NO_SEQ)) {
@@ -441,7 +465,10 @@ int main(int argc, char *argv[])
     }
 #else
     
+    stop_fpga_recv_thread();
     stop_fpga_send_thread();
+    fpga_exit_block();
+    pthread_join(recv_tid, NULL);
     pthread_join(send_tid, NULL);
     stop_fpga_thread();
 #if !DUMP_FILE
@@ -453,7 +480,7 @@ int main(int argc, char *argv[])
     }*/
 #if !DUMP_FILE
     //fpga_set_block();
-    //fpga_finalize();
+    fpga_finalize();
 #endif
 #endif
 
@@ -577,6 +604,14 @@ int main(int argc, char *argv[])
     fprintf(stderr, "mem init time:           %.3f msec\n", mem_init_time);
     fprintf(stderr, "create thread time:      %.3f msec\n", create_time);
     
+    for(i = 0; i < sizeof(multi_thread_time)/sizeof(multi_thread_time[0]); i++) {
+            if(multi_thread_time[i] == 0)
+                    break;
+            fprintf(stderr, "multi_thread_time time[%d]:      %.3f msec\n", i, multi_thread_time[i]);
+    }
+    fprintf(stderr, "\n");
+    
+    
     fprintf(stderr, "\n\n\n");
     for(i = 0; i < sizeof(step0)/sizeof(step0[0]); i++) {
             if(step0[i] == 0)
@@ -584,16 +619,69 @@ int main(int argc, char *argv[])
             fprintf(stderr, "step0 time[%d]:      %.3f msec\n", i, step0[i]);
     }
     fprintf(stderr, "\n");
+    double step1_total = 0;
     for(i = 0; i < sizeof(step1)/sizeof(step1[0]); i++) {
             if(step1[i] == 0)
                     break;
+            step1_total += step1[i];
             fprintf(stderr, "step1 time[%d]:      %.3f msec\n", i, step1[i]);
     }
+    fprintf(stderr, "step1 total time:      %.3f msec\n", step1_total);
     fprintf(stderr, "\n");
     for(i = 0; i < sizeof(step2)/sizeof(step2[0]); i++) {
             if(step2[i] == 0)
                     break;
             fprintf(stderr, "step2 time[%d]:      %.3f msec\n", i, step2[i]);
     }
+    
+    fprintf(stderr, "\n");
+    double fun1_total = 0;
+    for(i = 0; i < sizeof(fun_1_time)/sizeof(fun_1_time[0]); i++) {
+            if(fun_1_time[i] == 0)
+                    break;
+            fun1_total += fun_1_time[i];
+    }
+    fprintf(stderr, "fun_1_time time:      %.3f msec\n", fun1_total/i);
+    fprintf(stderr, "\n");
+    
+    double fun2_total = 0;
+    for(i = 0; i < sizeof(fun_2_time)/sizeof(fun_2_time[0]); i++) {
+            if(fun_2_time[i] == 0)
+                    break;
+            fun2_total += fun_2_time[i];
+    }
+    fprintf(stderr, "fun_2_time time:      %.3f msec\n", fun2_total/i);
+    fprintf(stderr, "\n");
+    
+    double fun3_total = 0;
+    for(i = 0; i < sizeof(fun_3_time)/sizeof(fun_3_time[0]); i++) {
+            if(fun_3_time[i] == 0)
+                    break;
+            fun3_total += fun_3_time[i];
+    }
+    fprintf(stderr, "fun_3_time time:      %.3f msec\n", fun3_total/i);
+    fprintf(stderr, "\n");
+    
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    
+    fprintf(stderr, "ru_utime=%.3f\n", (usage.ru_utime.tv_sec*1000 + usage.ru_utime.tv_usec*1e-3));
+    fprintf(stderr, "ru_stime=%.3f\n", (usage.ru_stime.tv_sec*1000 + usage.ru_stime.tv_usec*1e-3));
+    fprintf(stderr, "ru_maxrss=%ld\n", usage.ru_maxrss);
+    fprintf(stderr, "ru_ixrss=%ld\n", usage.ru_ixrss);
+    fprintf(stderr, "ru_idrss=%ld\n", usage.ru_idrss);
+    fprintf(stderr, "ru_isrss=%ld\n", usage.ru_isrss);
+    fprintf(stderr, "ru_minflt=%ld\n", usage.ru_minflt);
+    fprintf(stderr, "ru_majflt=%ld\n", usage.ru_majflt);
+    fprintf(stderr, "ru_nswap=%ld\n", usage.ru_nswap);
+    fprintf(stderr, "ru_inblock=%ld\n", usage.ru_inblock);
+    fprintf(stderr, "ru_oublock=%ld\n", usage.ru_oublock);
+    fprintf(stderr, "ru_msgsnd=%ld\n", usage.ru_msgsnd);
+    fprintf(stderr, "ru_msgrcv=%ld\n", usage.ru_msgrcv);
+    fprintf(stderr, "ru_nsignals=%ld\n", usage.ru_nsignals);
+    fprintf(stderr, "ru_nvcsw=%ld\n", usage.ru_nvcsw);
+    fprintf(stderr, "ru_nivcsw=%ld\n", usage.ru_nivcsw);
+    
+    
 	return 0;
 }

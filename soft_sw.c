@@ -89,6 +89,7 @@ int send_task(chain_sw_task_t* chain_sw_tasks)
     if (task_is_full()) {
         pthread_mutex_unlock(&tasks_mutex);
         //fprintf(stderr, "task ringbuf is full\n");
+        usleep(500);
         return -1;
     }
     total_send_task++;
@@ -108,6 +109,7 @@ chain_sw_task_t* get_task()
     if (task_is_empty()) {
         pthread_mutex_unlock(&tasks_mutex);
         //fprintf(stderr, "task ringbuf is empty\n");
+        usleep(500);
         return NULL;
     }
     total_recv_task++;
@@ -153,6 +155,7 @@ int send_result(sw_result_t* results)
     if (result_is_full()) {
         pthread_mutex_unlock(&results_mutex);
         //fprintf(stderr, "result ringbuf is full\n");
+        usleep(500);
         return -1;
     }
     total_send_result++;
@@ -172,6 +175,7 @@ sw_result_t* get_result()
     pthread_mutex_lock(&results_mutex);
     if (result_is_empty()) {
         pthread_mutex_unlock(&results_mutex);
+        usleep(500);
         //fprintf(stderr, "result ringbuf is empty\n");
         return NULL;
     }

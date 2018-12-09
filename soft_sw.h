@@ -8,7 +8,7 @@
 #define CHAIN_TASK_NUM     4096    //保存chain任务的数量
 #define CHAIN_RESULT_NUM     4096    //保存chain结果的数量
 
-#define SEND_ARRAY_MAX      128     //待发送的chain task数量最大值
+#define SEND_ARRAY_MAX      300     //待发送的chain task数量最大值
 
 typedef struct _sw_context_t sw_context_t;
 typedef struct _chain_context_t chain_context_t;
@@ -32,16 +32,12 @@ typedef struct _context_t{
     int qlen;
     char* seq;
 
-    uint8_t* tseq;
 
     int rep_len;
     int *n_regs;        //存放结果
     mm_reg1_t **regs;   //存放结果
 
     int8_t mat[25];
-    mm_reg1_t *r;
-    
-    uint8_t *qseq0;     //结果处理完要释放
 
     long read_index;                    //read编号
     int chain_num;

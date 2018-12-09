@@ -706,7 +706,7 @@ void* send_task_thread(void* arg)
     free(in_file);
     free(out_file);
     return NULL;
-}*/
+}
 
 void* recv_task_thread(void *arg)
 {
@@ -799,18 +799,26 @@ void* recv_task_thread(void *arg)
     }
     
     return NULL;
-}
+}*/
 
+
+#define FPGA_SIZE_OFFSET    (32)
+#define FPGA_ADDR_OFFSET    (20)
+#define HIGH_MASK   (0xffffffff00000000)
+#define LOW_MASK    (0x00000000ffffffff)
 
 //保存发送任务的队列
-#define TASK_MAX    4096
-static task_t tasks[TASK_MAX];
+#define QUEUE_MAX    4096000
+static task_t tasks[QUEUE_MAX];
 static pthread_mutex_t tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int tasks_head = 0;
 static int tasks_tail = 0;
 
 static int fpga_send_task_stop = 1;
 
+static pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
+static volatile unsigned int fpga_task_count = 0;
+static unsigned int send_count = 0;
 void init_fpga_task_array()
 {
     memset(tasks, 0, sizeof(tasks));
@@ -827,7 +835,7 @@ void stop_fpga_send_thread()
 
 static int fpga_task_is_full()
 {
-    return ((tasks_tail + 1) % TASK_MAX == tasks_head);
+    return ((tasks_tail + 1) % QUEUE_MAX == tasks_head);
 }
 static int fpga_task_is_empty()
 {
@@ -839,10 +847,11 @@ int send_fpga_task(task_t task)
     pthread_mutex_lock(&tasks_mutex);
     if (fpga_task_is_full()) {
         pthread_mutex_unlock(&tasks_mutex);
+        usleep(500);
         return -1;
     }
     tasks[tasks_tail] = task;
-    tasks_tail = (tasks_tail + 1) % TASK_MAX;
+    tasks_tail = (tasks_tail + 1) % QUEUE_MAX;
         
     pthread_mutex_unlock(&tasks_mutex);
     return 0;
@@ -853,10 +862,11 @@ int get_fpga_task(task_t* task)
     pthread_mutex_lock(&tasks_mutex);
     if (fpga_task_is_empty()) {
         pthread_mutex_unlock(&tasks_mutex);
+        usleep(500);
         return 1;
     }
     *task = tasks[tasks_head];
-    tasks_head = (tasks_head + 1) % TASK_MAX;
+    tasks_head = (tasks_head + 1) % QUEUE_MAX;
     pthread_mutex_unlock(&tasks_mutex);
     return 0;
 }
@@ -865,6 +875,7 @@ void* send_task_thread(void* arg)
 {
     void* fpga_buf;
     task_t task;
+    unsigned long long reg_data = 0;
     while(fpga_send_task_stop) {
         if(get_fpga_task(&task)) {
             continue;
@@ -874,8 +885,144 @@ void* send_task_thread(void* arg)
             fprintf(stderr, "fpga_get_writebuf return NULL\n");
             exit(1);
         }
+        //fprintf(stderr, "send fpga_buf=%p size:%u\n", fpga_buf, task.size);
         memcpy(fpga_buf, task.data, task.size);
-        fpga_writebuf_submit(fpga_buf, task.size, TYPE_SW);
+        //fpga_writebuf_submit(fpga_buf, task.size, TYPE_SW);
+    
+        unsigned long long phy = fpga_virt_to_phy(fpga_buf);
+    
+        reg_data = task.size - 4096;
+        reg_data = (reg_data << FPGA_SIZE_OFFSET);
+        reg_data = reg_data | (phy >> FPGA_ADDR_OFFSET);
+        
+        pthread_mutex_lock(&count_mutex);
+        while(fpga_task_count >= 512){
+            pthread_mutex_unlock(&count_mutex);
+            usleep(500);
+            continue;
+        }
+        
+        fpga_write_reg(reg_data, 0x200);
+        fpga_task_count++;
+        unsigned int count = fpga_task_count;
+        pthread_mutex_unlock(&count_mutex);
+        //fprintf(stderr, "send [%u]task_count=%u, reg_data=0x%llx", send_count++, count, reg_data);
         free(task.data);
+    }
+}
+
+static result_t results[QUEUE_MAX];
+static pthread_mutex_t result_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int result_head = 0;
+static int result_tail = 0;
+
+static int fpga_recv_result_stop = 1;
+
+void init_fpga_result_array()
+{
+    memset(results, 0, sizeof(results));
+    result_head = 0;
+    result_tail = 0;
+    fpga_recv_result_stop = 1;
+    return;
+}
+
+void stop_fpga_recv_thread()
+{
+    fpga_recv_result_stop = 0;
+}
+
+static int fpga_result_is_full()
+{
+    return ((result_tail + 1) % QUEUE_MAX == result_head);
+}
+static int fpga_result_is_empty()
+{
+    return (result_head == result_tail);
+}
+
+int send_fpga_result(result_t result)
+{
+    pthread_mutex_lock(&result_mutex);
+    if (fpga_result_is_full()) {
+        pthread_mutex_unlock(&result_mutex);
+        usleep(500);
+        return -1;
+    }
+    results[result_tail] = result;
+    result_tail = (result_tail + 1) % QUEUE_MAX;
+        
+    pthread_mutex_unlock(&result_mutex);
+    return 0;
+}
+
+int get_fpga_result(result_t* result)
+{
+    pthread_mutex_lock(&result_mutex);
+    if (fpga_result_is_empty()) {
+        pthread_mutex_unlock(&result_mutex);
+        usleep(500);
+        return 1;
+    }
+    *result = results[result_head];
+    result_head = (result_head + 1) % QUEUE_MAX;
+    pthread_mutex_unlock(&result_mutex);
+    return 0;
+}
+
+
+unsigned int recv_count = 0;
+void* recv_task_thread(void* arg)
+{
+    void* fpga_buf;
+    int fpga_len;
+    result_t result;
+    uint64_t reg_data;
+    
+    unsigned int size;
+    unsigned long long phy_addr;
+    unsigned int type;
+    void* virt_addr;
+    
+    while(fpga_recv_result_stop) {
+        /*fpga_buf = fpga_get_retbuf(&fpga_len, RET_TYPE_SW);
+        if(fpga_len == 0) {
+            fprintf(stderr, "exit recv fpga thread\n");
+            return NULL;
+        }
+        if(fpga_buf == NULL) {
+            fprintf(stderr, "fpga_get_retbuf return NULL\n");
+            exit(1);
+        }
+        if(fpga_len > 4*1024*1024) {
+            fprintf(stderr, "fpga_len too long, %d\n", fpga_len);
+            exit(1);
+        }*/
+        
+        reg_data = fpga_read_reg(0x300);
+        if(reg_data == 0) {
+            usleep(500);
+            continue;
+        }
+        size = (reg_data & HIGH_MASK) >> FPGA_SIZE_OFFSET;
+        size += 4096;
+        phy_addr = (reg_data & LOW_MASK) << FPGA_ADDR_OFFSET;
+        
+        if(phy_addr == 0 || size == 4096) {
+            fprintf(stderr, "phy_addr=0x%016llx, size=%u\n", phy_addr, size);
+        }
+        
+        pthread_mutex_lock(&count_mutex);
+        fpga_task_count--;
+        unsigned int count = fpga_task_count;
+        pthread_mutex_unlock(&count_mutex);
+        
+        result.data = malloc(size);
+        result.size = size;
+        virt_addr = fpga_phy_to_virt(phy_addr);
+        //fprintf(stderr, "recv [%u]task_count=%u, phy_addr=0x%016llx, virt_addr=%p\n", recv_count++, count, phy_addr, virt_addr);
+        memcpy(result.data, virt_addr, result.size);
+        fpga_release_retbuf(virt_addr);
+        while(send_fpga_result(result));
     }
 }
