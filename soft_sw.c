@@ -364,6 +364,26 @@ void add_chain_context(context_t* context, chain_context_t* chain_context)
     }
 }
 
+void insert_chain_context(context_t* context, chain_context_t* chain_context, int pos)
+{
+    if(pos > context->chain_num) {
+        fprintf(stderr, "ERROR:chain context num=%d, insert pos=%d\n", context->chain_num, pos);
+        assert(0);
+    }
+    if(context != NULL && chain_context != NULL) {
+        if(context->chain_size == context->chain_num) {
+            context->chain_size = context->chain_size*2;
+            context->chain_contexts = (chain_context_t**)realloc(context->chain_contexts, context->chain_size * sizeof(chain_context_t*));
+        }
+        if(pos < context->chain_num) {
+            memmove(&context->chain_contexts[pos + 1], &context->chain_contexts[pos], sizeof(chain_context_t*) * (context->chain_num - pos));
+        }
+        context->chain_contexts[pos] = chain_context;
+        context->chain_num++;
+        chain_context->context = context;
+    }
+}
+
 chain_context_t* create_chain_context()
 {
     chain_context_t* chain_context = (chain_context_t *)malloc(sizeof(chain_context_t));

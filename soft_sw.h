@@ -43,6 +43,9 @@ typedef struct _context_t{
     int chain_num;
     int chain_size;
     chain_context_t** chain_contexts;    //保存该read下每条chain的上下文
+    
+    int next_chain;         //表示该read做到第几条chain了，当进入save_read_result函数后，需要从哪条chain继续做
+    uint8_t *qseq0[2];
 }context_t;
 
 typedef struct _chain_context_t{
@@ -201,6 +204,8 @@ context_t* create_context(long id);
 chain_context_t* create_chain_context();
 //向一个read上下文添加一个chain上下文
 void add_chain_context(context_t* context, chain_context_t* chain_context);
+//向pos位置添加一个chain上下文,pos从0开始
+void insert_chain_context(context_t* context, chain_context_t* chain_context, int pos);
 //向一个chain上下文添加一个sw上下文
 void add_sw_context(chain_context_t* chain_context, sw_context_t* sw_context);
 

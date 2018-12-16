@@ -470,7 +470,6 @@ int main(int argc, char *argv[])
     fpga_exit_block();
     pthread_join(recv_tid, NULL);
     pthread_join(send_tid, NULL);
-    stop_fpga_thread();
 #if !DUMP_FILE
     fpga_exit_block();
 #endif

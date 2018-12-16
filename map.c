@@ -290,7 +290,7 @@ static void align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int
 	return;
 }
 
-static mm_reg1_t *align_regs_ori(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int qlen, const char *seq, int *n_regs, mm_reg1_t *regs, int n_a, mm128_t *a)
+/*static mm_reg1_t *align_regs_ori(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int qlen, const char *seq, int *n_regs, mm_reg1_t *regs, int n_a, mm128_t *a)
 {
 	if (!(opt->flag & MM_F_CIGAR)) return regs;
 	regs = mm_align_skeleton_ori(km, opt, mi, qlen, seq, n_regs, regs, n_a, a); // this calls mm_filter_regs()
@@ -300,7 +300,7 @@ static mm_reg1_t *align_regs_ori(const mm_mapopt_t *opt, const mm_idx_t *mi, voi
 		mm_set_sam_pri(*n_regs, regs);
 	}
 	return regs;
-}
+}*/
 
 
 void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long read_index, user_params_t* params, int tid)
@@ -643,11 +643,11 @@ static void *worker_pipeline(void *shared, int step, void *in)
         init_result_array();
 
         //TODO 处理结果的线程
-        user_args_t user_args[13];
-        pthread_t sw_tid[13];
-        for(i = 0; i < 13; i++) {
-            user_args[i].tid = i;
-            user_args[i].params = &params;
+        //user_args_t user_args[10];
+        pthread_t sw_tid[10];
+        for(i = 0; i < 10; i++) {
+            //user_args[i].tid = i;
+            //user_args[i].params = &params;
             //pthread_create(&sw_tid[i], NULL, sw_result_thread, &user_args[i]);
             pthread_create(&sw_tid[i], NULL, sw_result_thread, &params);
         }
@@ -664,7 +664,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
         double t3, t4;
         t3 = realtime_msec();
         pthread_join(soft_sw_tid, NULL);
-        for(i = 0; i < 13; i++)
+        for(i = 0; i < 10; i++)
             pthread_join(sw_tid[i], NULL);
         t4 = realtime_msec();
         fprintf(stderr, "t2-t1=%.3f msec\n", t4-t3);
@@ -790,11 +790,19 @@ void reverse_cigar(int n_cigar, uint32_t *cigar)
 
 static int save_read_result(long read_id, read_result_t* read_result, context_t* context, int num, char* read_flag, int* chain_num)
 {
-    int ret = 0;
     int k = 0;
     int chain_i = 0;
+    int next_chain = context->next_chain;       //确定开始处理的chain
+    void* km = context->b->km;
+    const mm_idx_t *mi = context->mi;
+    const mm_mapopt_t *opt = context->opt;
+    mm128_t *a = context->a;
+    int qlen = context->qlen;
+    int8_t* mat = context->mat;
+    
+    int is_sr = !!(opt->flag & MM_F_SR);
     //fprintf(stderr, "read_id=%ld\n", read_id);
-    for(chain_i = 0; chain_i < num; chain_i++) {
+    for(chain_i = next_chain; chain_i < num; chain_i++) {
         chain_context_t* chain_context = context->chain_contexts[chain_i];
         sw_context_t** sw_contexts = chain_context->sw_contexts;
         sw_result_t* result = read_result->chain_results[chain_i];
@@ -807,27 +815,19 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
         //r2.cnt = 0;
         memset(&r2, 0, sizeof(r2));
 
-        mm_reg1_t *r = &(context->regs0[chain_context->i]);
+        mm_reg1_t *r = &(context->regs0[chain_i]);      //取到当前chain的regs
         mm_reg1_t *regs = context->regs0;
 
         //取出read上下文
-        const mm_idx_t *mi = context->mi;
-        void* km = context->b->km;
-        const mm_mapopt_t *opt = context->opt;
-        mm128_t *a = context->a;
-        int qlen = context->qlen;
-        int8_t* mat = context->mat;
-        
         int32_t rs = chain_context->rs;
         int32_t qs = chain_context->qs;
         int32_t qs0 = chain_context->qs0;
         int32_t rev = chain_context->rev;
 
-        int is_sr = !!(opt->flag & MM_F_SR);
         
         
         
-        //fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", context->n_regs0, chain_context->i, read_index);
+        
         if(sw_contexts[0]->pos_flag == 0) {  //left
             result_num--;
             k = 1;  //有左扩展
@@ -984,98 +984,70 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                 r->p->trans_strand ^= 3; // flip to the read strand
         }
 
-        if(r2.cnt > 0) {   //此时这条read需要重新做sw
-            //fprintf(stderr, "1.insert chain\n");
-            *read_flag = 1;
-            int n_regs0 = context->n_regs0;
-            context->regs0_ori = align_regs_ori(opt, mi, km, qlen, context->seq, &n_regs0, context->regs0_ori, context->n_a, context->a_ori);
-            mm_set_mapq(km, n_regs0, context->regs0_ori, opt->min_chain_score, opt->a, context->rep_len, is_sr);
-            *(context->n_regs) = n_regs0;           //保存结果
-            context->regs[0] = context->regs0_ori;  //保存结果
-            
-            //释放该read所有上下文内容
-            for(;chain_i < num; chain_i++) {
-                chain_context_t* chain_context = context->chain_contexts[chain_i];
-                sw_result_t* result = read_result->chain_results[chain_i];
-                
-                destroy_results(result);
-                destroy_chain_context(chain_context);
-                context->chain_contexts[chain_i] = NULL;
-            }
+        if(r2.cnt > 0) {   //此时这条read需要插入一个chain
+            mm_reg1_t tmp_r2;
 
-            free(context->a_ori);
-            free(context->regs0);
-            free(context->a);
-            free(context->seq);
-            free(context);
+            //将该条read的chain数量加1
+            *chain_num = *chain_num + 1;    //当前read的chain的数量加1
             
+            //在该条read的regs里新增一个reg
+            context->regs0 = mm_insert_reg(&r2, chain_i, &context->n_regs0, context->regs0);
             
-            return 1;   //返回1表示该条read成功处理
+            //设置下次开始处理的chain index为当前index的下一个
+            context->next_chain = chain_i + 1;
+            
+            //在当前chain的结果位置下面插入一个新的chain
+            read_result->chain_results = (sw_result_t **)realloc(read_result->chain_results, (*chain_num) * sizeof(sw_result_t*));
+            memmove(&read_result->chain_results[chain_i + 2], &read_result->chain_results[chain_i + 1], sizeof(sw_result_t*) * (*chain_num - chain_i - 2));
+            read_result->chain_results[chain_i + 1] = NULL;
+            
+            //在当前chain的上下文位置下面插入一个新的chain
+            //给fpga发送新增chain的任务，新增chain的id是当前chain的id加1
+            chain_context_t* new_chain_context = create_chain_context();
+            insert_chain_context(context, new_chain_context, chain_i + 1);
+            mm_align2(km, opt, mi, context->qlen, context->qseq0, &context->regs0[chain_i], &tmp_r2, context->n_a, context->a, NULL, opt->flag, read_id, chain_i + 1, new_chain_context);
+            if (opt->flag&MM_F_SPLICE)
+				context->regs0[chain_i].p->trans_strand = opt->flag&MM_F_SPLICE_FOR? 1 : 2;
+            return 0;   //返回0表示该条read有插入chain的情况，等待sw结果完成后再处理该条read
         }
-        if (chain_context->i > 0 && regs[chain_context->i].split_inv) {
+        if (chain_i > 0 && regs[chain_i].split_inv) {
             ksw_extz_t tmp_ez;
             memset(&tmp_ez, 0, sizeof(tmp_ez));
-            if (mm_align1_inv(km, opt, mi, qlen, chain_context->qseq0, &regs[chain_context->i-1], &regs[chain_context->i], &r2, &tmp_ez)) {
+            if (mm_align1_inv(km, opt, mi, qlen, chain_context->qseq0, &regs[chain_i-1], &regs[chain_i], &r2, &tmp_ez)) {
                 //此时这条read需要重新做sw
-                //fprintf(stderr, "2.insert chain\n");
-                *read_flag = 1;
-                int n_regs0 = context->n_regs0;
-                context->regs0_ori = align_regs_ori(opt, mi, km, qlen, context->seq, &n_regs0, context->regs0_ori, context->n_a, context->a_ori);
-                mm_set_mapq(km, n_regs0, context->regs0_ori, opt->min_chain_score, opt->a, context->rep_len, is_sr);
-                *(context->n_regs) = n_regs0;           //保存结果
-                context->regs[0] = context->regs0_ori;  //保存结果
-                
-                //释放该read所有上下文内容
-                for(;chain_i < num; chain_i++) {
-                    chain_context_t* chain_context = context->chain_contexts[chain_i];
-                    sw_result_t* result = read_result->chain_results[chain_i];
-                    
-                    destroy_results(result);
-                    destroy_chain_context(chain_context);
-                    context->chain_contexts[chain_i] = NULL;
-                }
-
-                free(context->a_ori);
-                free(context->regs0);
-                free(context->a);
-                free(context->seq);
-                free(context);
+                fprintf(stderr, "insert chain\n");
+                exit(1);
                 
                 kfree(km, tmp_ez.cigar);
                 return 1;   //返回1表示该条read成功处理
             }
             kfree(km, tmp_ez.cigar);
         }
-        else {  //判断是否整条read做完的
-            *chain_num = *chain_num - 1;
-            //fprintf(stderr, "1.%ld read done, shengyude read %ld\n", read_index, params->read_num);
-            if(*chain_num == 0 && *read_flag == 0) {
-                mm_filter_regs(km, opt, qlen, &context->n_regs0, regs);
-                mm_hit_sort_by_dp(km, &context->n_regs0, regs);
-                if (!(opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
-                    mm_set_parent(km, opt->mask_level, context->n_regs0, regs, opt->a * 2 + opt->b);
-                    mm_select_sub(km, opt->pri_ratio, mi->k*2, opt->best_n, &context->n_regs0, regs);
-                    mm_set_sam_pri(context->n_regs0, regs);
-                }
-                mm_set_mapq(km, context->n_regs0, regs, opt->min_chain_score, opt->a, context->rep_len, is_sr);
-                *(context->n_regs) = context->n_regs0;           //保存结果
-                context->regs[0] = regs;  //保存结果
-                ret = 1;
-            }
-        }
-
+    }
+    
+    mm_filter_regs(km, context->opt, context->qlen, &context->n_regs0, context->regs0);
+    mm_hit_sort_by_dp(km, &context->n_regs0, context->regs0);
+    if (!(context->opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
+        mm_set_parent(km, context->opt->mask_level, context->n_regs0, context->regs0, context->opt->a * 2 + context->opt->b);
+        mm_select_sub(km, context->opt->pri_ratio, context->mi->k*2, context->opt->best_n, &context->n_regs0, context->regs0);
+        mm_set_sam_pri(context->n_regs0, context->regs0);
+    }
+    mm_set_mapq(km, context->n_regs0, context->regs0, context->opt->min_chain_score, context->opt->a, context->rep_len, is_sr);
+    *(context->n_regs) = context->n_regs0;           //保存结果
+    context->regs[0] = context->regs0;  //保存结果
+    //销毁该read下的所有上下文和结果
+    /*for() {
         destroy_results(result);
         //销毁结果数组和所有上下文
         destroy_chain_context(chain_context);
         context->chain_contexts[chain_i] = NULL;
-    }
-    
+    }*/
     free(context->a);
     free(context->regs0_ori);
     free(context->a_ori);
     free(context->seq);
     free(context);
-    return ret;
+    return 1;
 }
 
 //返回0表示执行成功 返回1表示所有read处理完成
@@ -1122,8 +1094,7 @@ int save_chain_result(sw_result_t* result, user_params_t* params, long read_num)
             }
         }
         else {
-            fprintf(stderr, "save_read_result ret is not 1\n");
-            assert(0);
+            return 0;
         }
     }
     else if(chain_result_num > params->chain_num[read_index]) {

@@ -449,9 +449,8 @@ extern double get_mem_time[100];
 extern double package_time[100];
 extern double send_time[100];
 
-void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size, int tid)
+void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size)
 {
-    double start, end;
     char* fpga_buf = NULL;
     char* p = NULL;
     fpga_task_t* head = NULL;
@@ -459,7 +458,6 @@ void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size, int ti
     fpga_sw_task* sw_task = NULL;
     task_t fpga_task;
 
-    start = realtime_msec();
 /*retry:
     fpga_buf = (char*)fpga_get_writebuf(data_size + 4096, BUF_TYPE_SW);
     if(fpga_buf == NULL) {
@@ -468,8 +466,6 @@ void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size, int ti
         exit(0);
     }*/
     fpga_buf = (char*)malloc(data_size + 4096);
-    end = realtime_msec();
-    get_mem_time[tid] += (end - start);
 
     head = (fpga_task_t*)fpga_buf;        //指向buff首地址
     head->check_id = CHECK_ID;
@@ -516,8 +512,6 @@ void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size, int ti
 
     assert((data_size + 4096) == ((char*)sw_task - fpga_buf));
 
-    start = realtime_msec();
-    package_time[tid] += (start - end);
     
     //fpga_writebuf_submit(fpga_buf, data_size + 4096, TYPE_SW);
     fpga_task.data = (void*)fpga_buf;
@@ -525,9 +519,6 @@ void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size, int ti
     while(send_fpga_task(fpga_task)) {
         usleep(500);
     }
-    
-    end = realtime_msec();
-    send_time[tid] += (end - start);
 }
 
 void last_send(void *data, int tid)
@@ -637,7 +628,7 @@ void process_task(send_task_t* send_task, chain_sw_task_t* task, int tid, long r
     send_task->data_size += task->data_size;
     
     if(send_task->num > 64 && send_task->data_size < 6144000) {
-        send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size, tid);
+        send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size);
         __sync_add_and_fetch(&g_process_task_num, 1);
         send_task->num = 0;
         send_task->data_size = 0;
@@ -648,7 +639,7 @@ void process_task(send_task_t* send_task, chain_sw_task_t* task, int tid, long r
 
     /*if(g_process_task_num < (g_total_task_num/2)) {     //如果任务是总任务的一半以下，则立即发送任务
         if(send_task->num > 32) {
-            send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size, tid);
+            send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size);
             __sync_add_and_fetch(&g_process_task_num, 1);
             send_task->num = 0;
             send_task->data_size = 0;
@@ -656,7 +647,7 @@ void process_task(send_task_t* send_task, chain_sw_task_t* task, int tid, long r
     }
     else if(g_process_task_num >= (g_total_task_num/2)) {
         if(send_task->num < 32) {
-            send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size, tid);
+            send_to_fpga(send_task->chain_tasks, send_task->num, send_task->data_size);
             __sync_add_and_fetch(&g_process_task_num, 1);
             send_task->num = 0;
             send_task->data_size = 0;
@@ -1116,7 +1107,7 @@ end_align1_inv:
 	return ret;
 }
 
-static inline mm_reg1_t *mm_insert_reg(const mm_reg1_t *r, int i, int *n_regs, mm_reg1_t *regs)
+mm_reg1_t *mm_insert_reg(const mm_reg1_t *r, int i, int *n_regs, mm_reg1_t *regs)
 {
 	regs = (mm_reg1_t*)realloc(regs, (*n_regs + 1) * sizeof(mm_reg1_t));
 	if (i + 1 != *n_regs)
@@ -1150,10 +1141,15 @@ void mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int
     context->regs0 = regs;
     context->a_ori = (mm128_t*)malloc(n_a * sizeof(mm128_t));
     memcpy(context->a_ori, a, n_a * sizeof(mm128_t));
+    context->qseq0[0] = (uint8_t*)malloc(qlen * 2);
+    context->qseq0[1] = context->qseq0[0] + qlen;
+    memcpy(context->qseq0[0], qseq0[0], qlen * 2);
+    context->qlen = qlen;
     context->a = a;
     context->n_regs0 = n_regs;
     context->n_a = n_a;
     context->read_index = read_index;
+    context->next_chain = 0;        //表示在进入save_read_result函数后从第0条chain开始处理
 
 	//memset(&ez, 0, sizeof(ksw_extz_t));
     assert(params->chain_num[read_index] == 0xffffffff);
@@ -1448,8 +1444,6 @@ mm_reg1_t * mm_align_skeleton_ori(void *km, const mm_mapopt_t *opt, const mm_idx
 	memset(&ez, 0, sizeof(ksw_extz_t));
 	for (i = 0; i < n_regs; ++i) {
 		mm_reg1_t r2;
-        chain_context_t* chain_context = (chain_context_t*)malloc(sizeof(chain_context_t));
-        chain_context->i = i;
 
         //fprintf(stderr, "n_regs=%d, i=%d, read_index=%ld\n", n_regs, i, read_index);
 		if ((opt->flag&MM_F_SPLICE) && (opt->flag&MM_F_SPLICE_FOR) && (opt->flag&MM_F_SPLICE_REV)) { // then do two rounds of alignments for both strands
@@ -1488,4 +1482,384 @@ mm_reg1_t * mm_align_skeleton_ori(void *km, const mm_mapopt_t *opt, const mm_idx
     mm_filter_regs(km, opt, qlen, n_regs_, regs);
     mm_hit_sort_by_dp(km, n_regs_, regs);
     return regs;
+}
+
+
+
+void mm_align2(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], mm_reg1_t *r, mm_reg1_t *r2, int n_a, mm128_t *a, ksw_extz_t *ez, int splice_flag, long read_index, int chain_index, chain_context_t* chain_context)
+{
+	int is_sr = !!(opt->flag & MM_F_SR), is_splice = !!(opt->flag & MM_F_SPLICE);
+	int32_t rid = a[r->as].x<<1>>33, rev = a[r->as].x>>63, as1, cnt1;
+	uint8_t *tseq, *qseq;
+	int32_t i, l, bw, dropped = 0, extra_flag = 0, rs0, re0, qs0, qe0;
+	int32_t rs, re, qs, qe;
+	int32_t rs1, qs1, re1, qe1;
+	int8_t mat[25];
+    
+	if (is_sr) assert(!(mi->flag & MM_I_HPC)); // HPC won't work with SR because with HPC we can't easily tell if there is a gap
+
+	r2->cnt = 0;
+	if (r->cnt == 0) return;
+	ksw_gen_simple_mat(5, mat, opt->a, opt->b);
+	bw = (int)(opt->bw * 1.5 + 1.);
+
+	if (is_sr && !(mi->flag & MM_I_HPC)) {
+		mm_max_stretch(opt, r, a, &as1, &cnt1);
+		rs = (int32_t)a[as1].x + 1 - (int32_t)(a[as1].y>>32&0xff);
+		qs = (int32_t)a[as1].y + 1 - (int32_t)(a[as1].y>>32&0xff);
+		re = (int32_t)a[as1+cnt1-1].x + 1;
+		qe = (int32_t)a[as1+cnt1-1].y + 1;
+	} else {
+		if (is_splice) {
+			mm_fix_bad_ends_splice(km, opt, mi, r, mat, qlen, qseq0, a, &as1, &cnt1);
+		} else {
+			mm_fix_bad_ends(r, a, opt->bw, opt->min_chain_score * 2, &as1, &cnt1);
+		}
+		mm_filter_bad_seeds(km, as1, cnt1, a, 10, 40, opt->max_gap>>1, 10);
+		mm_adjust_minier(mi, qseq0, &a[as1], &rs, &qs);
+		mm_adjust_minier(mi, qseq0, &a[as1 + cnt1 - 1], &re, &qe);
+	}
+	assert(cnt1 > 0);
+
+	if (is_splice) {
+		if (splice_flag & MM_F_SPLICE_FOR) extra_flag |= rev? KSW_EZ_SPLICE_REV : KSW_EZ_SPLICE_FOR;
+		if (splice_flag & MM_F_SPLICE_REV) extra_flag |= rev? KSW_EZ_SPLICE_FOR : KSW_EZ_SPLICE_REV;
+		if (opt->flag & MM_F_SPLICE_FLANK) extra_flag |= KSW_EZ_SPLICE_FLANK;
+	}
+
+	/* Look for the start and end of regions to perform DP. This sounds easy
+	 * but is in fact tricky. Excessively small regions lead to unnecessary
+	 * clippings and lose alignable sequences. Excessively large regions
+	 * occasionally lead to large overlaps between two chains and may cause
+	 * loss of alignments in corner cases. */
+	if (is_sr) {
+		qs0 = 0, qe0 = qlen;
+		l = qs;
+		l += l * opt->a + opt->end_bonus > opt->q? (l * opt->a + opt->end_bonus - opt->q) / opt->e : 0;
+		rs0 = rs - l > 0? rs - l : 0;
+		l = qlen - qe;
+		l += l * opt->a + opt->end_bonus > opt->q? (l * opt->a + opt->end_bonus - opt->q) / opt->e : 0;
+		re0 = re + l < mi->seq[rid].len? re + l : mi->seq[rid].len;
+	} else {
+		// compute rs0 and qs0
+		rs0 = (int32_t)a[r->as].x + 1 - (int32_t)(a[r->as].y>>32&0xff);
+		qs0 = (int32_t)a[r->as].y + 1 - (int32_t)(a[r->as].y>>32&0xff);
+		if (rs0 < 0) rs0 = 0; // this may happen when HPC is in use
+		assert(qs0 >= 0); // this should never happen, or it is logic error
+		rs1 = qs1 = 0;
+		for (i = r->as - 1, l = 0; i >= 0 && a[i].x>>32 == a[r->as].x>>32; --i) { // inspect nearby seeds
+			int32_t x = (int32_t)a[i].x + 1 - (int32_t)(a[i].y>>32&0xff);
+			int32_t y = (int32_t)a[i].y + 1 - (int32_t)(a[i].y>>32&0xff);
+			if (x < rs0 && y < qs0) {
+				if (++l > opt->min_cnt) {
+					l = rs0 - x > qs0 - y? rs0 - x : qs0 - y;
+					rs1 = rs0 - l, qs1 = qs0 - l;
+					break;
+				}
+			}
+		}
+		if (qs > 0 && rs > 0) {
+			l = qs < opt->max_gap? qs : opt->max_gap;
+			qs1 = qs1 > qs - l? qs1 : qs - l;
+			qs0 = qs0 < qs1? qs0 : qs1; // at least include qs0
+			l += l * opt->a > opt->q? (l * opt->a - opt->q) / opt->e : 0;
+			l = l < opt->max_gap? l : opt->max_gap;
+			l = l < rs? l : rs;
+			rs1 = rs1 > rs - l? rs1 : rs - l;
+			rs0 = rs0 < rs1? rs0 : rs1;
+		} else rs0 = rs, qs0 = qs;
+		// compute re0 and qe0
+		re0 = (int32_t)a[r->as + r->cnt - 1].x + 1;
+		qe0 = (int32_t)a[r->as + r->cnt - 1].y + 1;
+		re1 = mi->seq[rid].len, qe1 = qlen;
+		for (i = r->as + r->cnt, l = 0; i < n_a && a[i].x>>32 == a[r->as].x>>32; ++i) { // inspect nearby seeds
+			int32_t x = (int32_t)a[i].x + 1;
+			int32_t y = (int32_t)a[i].y + 1;
+			if (x > re0 && y > qe0) {
+				if (++l > opt->min_cnt) {
+					l = x - re0 > y - qe0? x - re0 : y - qe0;
+					re1 = re0 + l, qe1 = qe0 + l;
+					break;
+				}
+			}
+		}
+		if (qe < qlen && re < mi->seq[rid].len) {
+			l = qlen - qe < opt->max_gap? qlen - qe : opt->max_gap;
+			qe1 = qe1 < qe + l? qe1 : qe + l;
+			qe0 = qe0 > qe1? qe0 : qe1; // at least include qe0
+			l += l * opt->a > opt->q? (l * opt->a - opt->q) / opt->e : 0;
+			l = l < opt->max_gap? l : opt->max_gap;
+			l = l < mi->seq[rid].len - re? l : mi->seq[rid].len - re;
+			re1 = re1 < re + l? re1 : re + l;
+			re0 = re0 > re1? re0 : re1;
+		} else re0 = re, qe0 = qe;
+	}
+	if (a[r->as].y & MM_SEED_SELF) {
+		int max_ext = r->qs > r->rs? r->qs - r->rs : r->rs - r->qs;
+		if (r->rs - rs0 > max_ext) rs0 = r->rs - max_ext;
+		if (r->qs - qs0 > max_ext) qs0 = r->qs - max_ext;
+		max_ext = r->qe > r->re? r->qe - r->re : r->re - r->qe;
+		if (re0 - r->re > max_ext) re0 = r->re + max_ext;
+		if (qe0 - r->qe > max_ext) qe0 = r->qe + max_ext;
+	}
+
+	assert(re0 > rs0);
+    int tseq_len = re0 - rs0;
+	tseq = (uint8_t*)kmalloc(km, re0 - rs0);
+
+    //创建一个chain的sw任务
+    int small;
+    chain_sw_task_t* chain_task = create_chain_sw_task(read_index, chain_index);
+
+    chain_context->rs = rs;
+    chain_context->qs = qs;
+    chain_context->qs0 = qs0;
+    chain_context->rid = rid;
+    chain_context->rev = rev;
+
+    sw_task_t* sw_task = NULL;
+    sw_context_t* sw_context = NULL;
+	if (qs > 0 && rs > 0) { // left extension
+		qseq = &qseq0[rev][qs0];
+		mm_idx_getseq(mi, rid, rs0, rs, tseq);
+		mm_seq_rev(qs - qs0, qseq);
+		mm_seq_rev(rs - rs0, tseq);
+
+        sw_context = (sw_context_t*)malloc(sizeof(sw_context_t));
+        add_sw_context(chain_context, sw_context);
+        //TODO 保存上下文
+        sw_context->rs = rs;
+        sw_context->qs = qs;
+        sw_context->qs0 = qs0;
+        sw_context->pos_flag = 0;
+        
+        sw_context->query = (uint8_t*)malloc((qs - qs0) * sizeof(uint8_t));
+        sw_context->target = (uint8_t*)malloc((rs - rs0) * sizeof(uint8_t));
+        memcpy(sw_context->query, qseq, (qs - qs0) * sizeof(uint8_t));
+        memcpy(sw_context->target, tseq, (rs - rs0) * sizeof(uint8_t));
+        sw_context->qlen = qs - qs0;
+        sw_context->tlen = rs - rs0;
+        sw_context->w = bw;
+        sw_context->end_bonus = opt->end_bonus;
+        sw_context->zdrop = r->split_inv? opt->zdrop_inv : opt->zdrop;
+        sw_context->flag = extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR;
+        
+        //fprintf(stderr, "1.qlen=%d, tlen=%d, w=%d\n", qs - qs0, rs - rs0, bw);
+        sw_task = create_sw_task(qs - qs0, sw_context->query, rs - rs0, sw_context->target,
+                        mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
+                        r->split_inv? opt->zdrop_inv : opt->zdrop,
+                        opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
+                        0);
+
+        small = VSCMIN(sw_task->qlen, sw_task->tlen);
+        small = VSCMIN(small, sw_task->w);
+        if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
+            chain_task->flag = 1;
+        }
+        add_sw_task(chain_task, sw_task);
+		/*mm_align_pair(km, opt, qs - qs0, qseq, rs - rs0, tseq, mat, bw, opt->end_bonus, r->split_inv? opt->zdrop_inv : opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, ez);
+        if (ez->n_cigar > 0) {
+			mm_append_cigar(r, ez->n_cigar, ez->cigar);
+			r->p->dp_score += ez->max;
+		}
+		rs1 = rs - (ez->reach_end? ez->mqe_t + 1 : ez->max_t + 1);
+		qs1 = qs - (ez->reach_end? qs - qs0 : ez->max_q + 1);*/
+		mm_seq_rev(qs - qs0, qseq);
+	}
+    else {
+        rs1 = rs;
+        qs1 = qs;
+    }
+	re1 = rs, qe1 = qs;
+	//assert(qs1 >= 0 && rs1 >= 0);
+
+	for (i = is_sr? cnt1 - 1 : 1; i < cnt1; ++i) { // gap filling
+		if ((a[as1+i].y & (MM_SEED_IGNORE|MM_SEED_TANDEM)) && i != cnt1 - 1) continue;
+		if (is_sr && !(mi->flag & MM_I_HPC)) {
+			re = (int32_t)a[as1 + i].x + 1;
+			qe = (int32_t)a[as1 + i].y + 1;
+		} else mm_adjust_minier(mi, qseq0, &a[as1 + i], &re, &qe);
+		re1 = re, qe1 = qe;
+		if (i == cnt1 - 1 || (a[as1+i].y&MM_SEED_LONG_JOIN) || (qe - qs >= opt->min_ksw_len && re - rs >= opt->min_ksw_len)) {
+			//int j, bw1 = bw, zdrop_code;
+            int j, bw1 = bw;
+			if (a[as1+i].y & MM_SEED_LONG_JOIN)
+				bw1 = qe - qs > re - rs? qe - qs : re - rs;
+			// perform alignment
+			qseq = &qseq0[rev][qs];
+			mm_idx_getseq(mi, rid, rs, re, tseq);
+			if (is_sr) { // perform ungapped alignment
+				assert(qe - qs == re - rs);
+				ksw_reset_extz(ez);
+				for (j = 0, ez->score = 0; j < qe - qs; ++j) {
+					if (qseq[j] >= 4 || tseq[j] >= 4) ez->score += opt->e2;
+					else ez->score += qseq[j] == tseq[j]? opt->a : -opt->b;
+				}
+				ez->cigar = ksw_push_cigar(km, &ez->n_cigar, &ez->m_cigar, ez->cigar, 0, qe - qs);
+			} else { // perform normal gapped alignment
+                //fprintf(stderr, "2.qlen=%d, tlen=%d, w=%d\n", qe - qs, re - rs, bw1);
+				
+                sw_context = (sw_context_t*)malloc(sizeof(sw_context_t));
+                add_sw_context(chain_context, sw_context);
+                //TODO 保存上下文
+                sw_context->i = i;
+                sw_context->pos_flag = 1;
+                sw_context->cnt1 = cnt1;
+                sw_context->re = re;
+                sw_context->qe = qe;
+
+                sw_context->rs = rs;
+                sw_context->qs = qs;
+                sw_context->qs0 = qs0;
+                
+                sw_context->query = (uint8_t*)malloc((qe - qs) * sizeof(uint8_t));
+                sw_context->target = (uint8_t*)malloc((re - rs) * sizeof(uint8_t));
+                memcpy(sw_context->query, qseq, (qe - qs) * sizeof(uint8_t));
+                memcpy(sw_context->target, tseq, (re - rs) * sizeof(uint8_t));
+                sw_context->qlen = qe - qs;
+                sw_context->tlen = re - rs;
+                sw_context->w = bw1;
+                sw_context->end_bonus = -1;
+                sw_context->zdrop = opt->zdrop;
+                sw_context->flag = extra_flag|KSW_EZ_APPROX_MAX;
+                sw_context->zdrop_flag = extra_flag;
+                sw_context->as1 = as1;
+
+                sw_task = create_sw_task(qe - qs, sw_context->query, re - rs, sw_context->target,
+                        mat, opt->q, opt->e, opt->q2, opt->e2, bw1, 
+                        opt->zdrop,
+                        -1, extra_flag|KSW_EZ_APPROX_MAX, 
+                        1);
+                small = VSCMIN(sw_task->qlen, sw_task->tlen);
+                small = VSCMIN(small, sw_task->w);
+                if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
+                    chain_task->flag = 1;
+                }
+                add_sw_task(chain_task, sw_task);
+                //mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
+            }
+			// test Z-drop and inversion Z-drop
+			//if ((zdrop_code = mm_test_zdrop(km, opt, qseq, tseq, ez->n_cigar, ez->cigar, mat)) != 0)
+			//	mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, zdrop_code == 2? opt->zdrop_inv : opt->zdrop, extra_flag, ez); // second pass: lift approximate
+			// update CIGAR
+			/*if (ez->n_cigar > 0)
+				mm_append_cigar(r, ez->n_cigar, ez->cigar);
+			if (ez->zdropped) { // truncated by Z-drop; TODO: sometimes Z-drop kicks in because the next seed placement is wrong. This can be fixed in principle.
+				for (j = i - 1; j >= 0; --j)
+					if ((int32_t)a[as1 + j].x <= rs + ez->max_t){
+						fprintf(stderr, "1.break\n");
+                        break;
+                    }
+				dropped = 1;
+				if (j < 0) j = 0;
+				r->p->dp_score += ez->max;
+				re1 = rs + (ez->max_t + 1);
+				qe1 = qs + (ez->max_q + 1);
+				if (cnt1 - (j + 1) >= opt->min_cnt) {
+					mm_split_reg(r, r2, as1 + j + 1 - r->as, qlen, a);
+					if (zdrop_code == 2) r2->split_inv = 1;
+				}
+                fprintf(stderr, "2.break\n");
+				break;
+			} else r->p->dp_score += ez->score;*/
+			rs = re, qs = qe;
+		}
+	}
+
+	if (!dropped && qe < qe0 && re < re0) { // right extension
+		qseq = &qseq0[rev][qe];
+		mm_idx_getseq(mi, rid, re, re0, tseq);
+        //fprintf(stderr, "3.qlen=%d, tlen=%d, w=%d\n", qe0 - qe, re0 - re, bw);
+        
+        sw_context = (sw_context_t*)malloc(sizeof(sw_context_t));
+        add_sw_context(chain_context, sw_context);
+        //TODO 保存上下文
+        sw_context->w = bw;
+        sw_context->pos_flag = 2;
+        sw_context->re = re;
+        sw_context->qe = qe;
+        sw_context->qe0 = qe0;
+
+        sw_context->rs = rs;
+        sw_context->qs = qs;
+        sw_context->qs0 = qs0;
+        
+        sw_context->query = (uint8_t*)malloc((qe0 - qe) * sizeof(uint8_t));
+        sw_context->target = (uint8_t*)malloc((re0 - re) * sizeof(uint8_t));
+        memcpy(sw_context->query, qseq, (qe0 - qe) * sizeof(uint8_t));
+        memcpy(sw_context->target, tseq, (re0 - re) * sizeof(uint8_t));
+        sw_context->qlen = qe0 - qe;
+        sw_context->tlen = re0 - re;
+        sw_context->w = bw;
+        sw_context->end_bonus = opt->end_bonus;
+        sw_context->zdrop = opt->zdrop;
+        sw_context->flag = extra_flag|KSW_EZ_EXTZ_ONLY;
+
+        sw_task = create_sw_task(qe0 - qe, sw_context->query, re0 - re, sw_context->target,
+                        mat, opt->q, opt->e, opt->q2, opt->e2, bw, 
+                        opt->zdrop,
+                        opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY, 
+                        2);
+
+        small = VSCMIN(sw_task->qlen, sw_task->tlen);
+        small = VSCMIN(small, sw_task->w);
+        if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
+            chain_task->flag = 1;
+        }
+        add_sw_task(chain_task, sw_task);
+		/*mm_align_pair(km, opt, qe0 - qe, qseq, re0 - re, tseq, mat, bw, opt->end_bonus, opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY, ez);
+		if (ez->n_cigar > 0) {
+			mm_append_cigar(r, ez->n_cigar, ez->cigar);
+			r->p->dp_score += ez->max;
+		}
+		re1 = re + (ez->reach_end? ez->mqe_t + 1 : ez->max_t + 1);
+		qe1 = qe + (ez->reach_end? qe0 - qe : ez->max_q + 1);*/
+	}
+	//assert(qe1 <= qlen);
+
+    chain_context->rid = rid;
+    chain_context->re0 = re0;
+    chain_context->rs0 = rs0;
+    chain_context->tseq = (uint8_t*)malloc(tseq_len);
+    memcpy(chain_context->tseq, tseq, tseq_len);
+    chain_context->qseq0[0] = (uint8_t*)malloc(qlen * 2);
+    chain_context->qseq0[1] = chain_context->qseq0[0] + qlen;
+    memcpy(chain_context->qseq0[0], qseq0[0], qlen * 2);
+    
+	/*r->rs = rs1, r->re = re1;
+	if (rev) r->qs = qlen - qe1, r->qe = qlen - qs1;
+	else r->qs = qs1, r->qe = qe1;
+
+	assert(re1 - rs1 <= re0 - rs0);
+	if (r->p) {
+		mm_idx_getseq(mi, rid, rs1, re1, tseq);
+		mm_update_extra(r, &qseq0[r->rev][qs1], tseq, mat, opt->q, opt->e);
+		if (rev && r->p->trans_strand)
+			r->p->trans_strand ^= 3; // flip to the read strand
+	}*/
+    if(chain_task->flag == 1) {
+        int index = 0;
+        sw_result_t* result = create_result();
+        for(index = 0; index < chain_task->sw_num; index++) {
+            ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
+            memset(ez, 0, sizeof(ksw_extz_t));
+            sw_task_t* task = chain_task->sw_tasks[index];
+            
+            ksw_extd2_sse(NULL, task->qlen, task->query, task->tlen, task->target, 5, task->mat, task->q, task->e, task->q2, task->e2, task->w, task->zdrop, task->end_bonus, task->flag, ez);
+
+            add_result(result, ez);
+        }
+        result->read_id = chain_task->read_id;
+        result->chain_id = chain_task->chain_id;
+
+        destroy_chain_sw_task(chain_task);
+        while(send_result(result));
+    }
+    else {
+
+        //process_task(send_task, chain_task, read_index);  //将任务放到待发送队列
+        send_to_fpga(&chain_task, 1, chain_task->data_size);
+
+    }
+	kfree(km, tseq);
 }
