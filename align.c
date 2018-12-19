@@ -12,22 +12,6 @@
 
 #include "soft_sw.h"
 
-#include <sys/time.h>
-#include<time.h>
-extern double process_task_time[100];
-extern double sw_task_time[100];
-extern double sw_soft_time[100];
-static double realtime_msec(void)
-{
-	/*struct timeval tp;
-	struct timezone tzp;
-	gettimeofday(&tp, &tzp);
-	return tp.tv_sec*1000 + tp.tv_usec * 1e-3;*/
-
-    struct timespec tp;
-    clock_gettime(CLOCK_MONOTONIC, &tp);
-    return tp.tv_sec*1000 + tp.tv_nsec*1e-6;
-}
 
 static void ksw_gen_simple_mat(int m, int8_t *mat, int8_t a, int8_t b)
 {
@@ -658,7 +642,6 @@ void process_task(send_task_t* send_task, chain_sw_task_t* task, int tid, long r
 
 static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, uint8_t *qseq0[2], mm_reg1_t *r, mm_reg1_t *r2, int n_a, mm128_t *a, ksw_extz_t *ez, int splice_flag, long read_index, int chain_index, context_t* context, chain_context_t* chain_context, send_task_t* send_task, int tid, const long read_num)
 {
-    double start, end;
 	int is_sr = !!(opt->flag & MM_F_SR), is_splice = !!(opt->flag & MM_F_SPLICE);
 	int32_t rid = a[r->as].x<<1>>33, rev = a[r->as].x>>63, as1, cnt1;
 	uint8_t *tseq, *qseq;
@@ -666,8 +649,6 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	int32_t rs, re, qs, qe;
 	int32_t rs1, qs1, re1, qe1;
 	int8_t mat[25];
-
-    start = realtime_msec();
     
 	if (is_sr) assert(!(mi->flag & MM_I_HPC)); // HPC won't work with SR because with HPC we can't easily tell if there is a gap
 
@@ -1001,9 +982,6 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
     chain_context->qseq0[0] = (uint8_t*)malloc(qlen * 2);
     chain_context->qseq0[1] = chain_context->qseq0[0] + qlen;
     memcpy(chain_context->qseq0[0], qseq0[0], qlen * 2);
-
-    end = realtime_msec();
-    sw_task_time[tid] += (end - start);
     
 	/*r->rs = rs1, r->re = re1;
 	if (rev) r->qs = qlen - qe1, r->qe = qlen - qs1;
@@ -1018,7 +996,6 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	}*/
     if(chain_task->flag == 1) {
         int index = 0;
-        start = realtime_msec();
         sw_result_t* result = create_result();
         for(index = 0; index < chain_task->sw_num; index++) {
             ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
@@ -1037,15 +1014,12 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         long_chain_counter++;
         pthread_mutex_unlock(&long_chain_mutex);
         while(send_result(result));
-        end = realtime_msec();
-        sw_soft_time[tid] += (end - start);
+
     }
     else {
-        double start, end;
-        start = realtime_msec();
+
         process_task(send_task, chain_task, tid, read_index, read_num);  //将任务放到待发送队列
-        end = realtime_msec();
-        process_task_time[tid] += (end - start);
+
     }
 	kfree(km, tseq);
 }

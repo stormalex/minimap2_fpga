@@ -384,6 +384,22 @@ void insert_chain_context(context_t* context, chain_context_t* chain_context, in
     }
 }
 
+void destroy_context(context_t* context)
+{
+    int i = 0;
+    
+    for(i = 0; i < context->chain_num; i++) {
+        destroy_chain_context(context->chain_contexts[i]);
+    }
+    free(context->chain_contexts);
+    
+    free(context->a);
+    free(context->regs0_ori);
+    free(context->a_ori);
+    free(context->seq);
+    free(context);
+}
+
 chain_context_t* create_chain_context()
 {
     chain_context_t* chain_context = (chain_context_t *)malloc(sizeof(chain_context_t));

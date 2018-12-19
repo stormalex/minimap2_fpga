@@ -200,6 +200,8 @@ void stop_sw_thread();
 
 //创建一个read的上下文
 context_t* create_context(long id);
+//
+void destroy_context(context_t* context);
 //创建一个chain的上下文
 chain_context_t* create_chain_context();
 //向一个read上下文添加一个chain上下文

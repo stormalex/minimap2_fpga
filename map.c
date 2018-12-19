@@ -21,29 +21,6 @@ static void* sw_result_thread(void* arg);
 struct mm_tbuf_s {
 	void *km;
 };
-extern double chaindp_time[100];
-extern double chaindp_sw_time[100];
-extern double sw_time[100];
-extern double create_time;
-extern double mem_init_time;
-extern double chaindp_1[100];
-extern double chaindp_2[100];
-extern double chaindp_3[100];
-extern double chaindp_4[100];
-extern double multi_thread_time[100];
-#include <sys/time.h>
-#include<time.h>
-static double realtime_msec(void)
-{
-	/*struct timeval tp;
-	struct timezone tzp;
-	gettimeofday(&tp, &tzp);
-	return tp.tv_sec*1000 + tp.tv_usec * 1e-3;*/
-
-    struct timespec tp;
-    clock_gettime(CLOCK_MONOTONIC, &tp);
-    return tp.tv_sec*1000 + tp.tv_nsec*1e-6;
-}
 
 mm_tbuf_t *mm_tbuf_init(void)
 {
@@ -305,7 +282,6 @@ static void align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *km, int
 
 void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long read_index, user_params_t* params, int tid)
 {
-    double start, end, end1, t1, t2, t3;
 	int i, j, rep_len, qlen_sum, n_regs0, n_mini_pos;
 	int max_chain_gap_qry, max_chain_gap_ref, is_splice = !!(opt->flag & MM_F_SPLICE), is_sr = !!(opt->flag & MM_F_SR);
 	uint32_t hash;
@@ -316,7 +292,6 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	mm_reg1_t *regs0;
 	//km_stat_t kmst;
 
-    start = realtime_msec();
     
 	for (i = 0, qlen_sum = 0; i < n_segs; ++i)
 		qlen_sum += qlens[i], n_regs[i] = 0, regs[i] = 0;
@@ -331,8 +306,6 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	if (opt->flag & MM_F_HEAP_SORT) a = collect_seed_hits_heap(b->km, opt, opt->mid_occ, mi, qname, &mv, qlen_sum, &n_a, &rep_len, &n_mini_pos, &mini_pos);
 	else a = collect_seed_hits(b->km, opt, opt->mid_occ, mi, qname, &mv, qlen_sum, &n_a, &rep_len, &n_mini_pos, &mini_pos);
 
-    t1 = realtime_msec();
-    chaindp_1[tid] += (t1 - start);
     
 	if (mm_dbg_flag & MM_DBG_PRINT_SEED) {
 		fprintf(stderr, "RS\t%d\n", rep_len);
@@ -354,8 +327,6 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	a = mm_chain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->min_cnt, opt->min_chain_score, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 
-    t2 = realtime_msec();
-    chaindp_2[tid] += (t2 - t1);
     
 	if (opt->max_occ > opt->mid_occ && rep_len > 0) {
 		int rechain = 0;
@@ -382,9 +353,6 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	}
 
 	regs0 = mm_gen_regs(b->km, hash, qlen_sum, n_regs0, u, a);
-
-    t3 = realtime_msec();
-    chaindp_3[tid] += (t3 - t2);
     
 	if (mm_dbg_flag & MM_DBG_PRINT_SEED)
 		for (j = 0; j < n_regs0; ++j)
@@ -398,10 +366,6 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
     kfree(b->km, mv.a);
 	kfree(b->km, u);
 	kfree(b->km, mini_pos);
-
-    end = realtime_msec();
-    chaindp_4[tid] += (end - t3);
-    chaindp_time[tid] += (end - start);
     
 	if (n_segs == 1) { // uni-segment
         //创建read上下文并保存在全局数组中
@@ -452,9 +416,6 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 			b->km = km_init();
 		}
 	}*/
-    end1 = realtime_msec();
-    sw_time[tid] += (end1 - end);
-    chaindp_sw_time[tid] += (end1 - start);
 }
 
 mm_reg1_t *mm_map(const mm_idx_t *mi, int qlen, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname)
@@ -532,27 +493,14 @@ typedef struct {
 volatile int g_total_task_num = 0;       //fpga最大任务数
 volatile int g_process_task_num = 0;     //当前fpga处理的任务数
 
-static int count = 0;
-static int step0_i = 0;
-static int step1_i = 0;
-static int step2_i = 0;
-
-extern double step0_first;
-extern double step2_last;
-extern double step0[100];
-extern double step1[100];
-extern double step2[100];
-
 void last_send(void *params, int tid);
 void* soft_sw_result_thread(void* arg);
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
 	int i, j, k;
-    double start, end, t1, t2;
     pipeline_t *p = (pipeline_t*)shared;
     if (step == 0) { // step 0: read sequences
-        start = realtime_msec();
         fprintf(stderr, "entry step 0\n");
 		int with_qual = (!!(p->opt->flag & MM_F_OUT_SAM) && !(p->opt->flag & MM_F_NO_QUAL));
 		int with_comment = !!(p->opt->flag & MM_F_COPY_COMMENT);
@@ -578,12 +526,6 @@ static void *worker_pipeline(void *shared, int step, void *in)
 					s->seg_off[s->n_frag++] = j;
 					j = i;
 				}
-            end = realtime_msec();
-            step0[step0_i++] = end - start;
-            if(count == 0) {
-                count = 1;
-                step0_first = (end - start);
-            }
             fprintf(stderr, "exit step 0\n");
 			return s;
 		} else free(s);
@@ -591,8 +533,6 @@ static void *worker_pipeline(void *shared, int step, void *in)
         int i = 0;
         user_params_t params;
         fprintf(stderr, "entry step 1\n");
-        
-        start = realtime_msec();
         
         memset(&params, 0, sizeof(params));
 
@@ -624,7 +564,6 @@ static void *worker_pipeline(void *shared, int step, void *in)
             params.send_task[i].chain_tasks = (chain_sw_task_t**)malloc(SEND_ARRAY_MAX * sizeof(chain_sw_task_t*));
         }
         
-        t1 = realtime_msec();
         
         //fpga_set_block();   //设置阻塞位，当处于阻塞模式时候不会退出
         params.exit = 1;
@@ -655,20 +594,13 @@ static void *worker_pipeline(void *shared, int step, void *in)
         pthread_t soft_sw_tid;
         pthread_create(&soft_sw_tid, NULL, soft_sw_result_thread, &params);
 
-        t2 = realtime_msec();
-        mem_init_time += (t2 - start);
-        create_time += (t2 - t1);
         
 		kt_for_map(p->n_threads, worker_for, in, ((step_t*)in)->n_frag, (void *)&params, last_send, sw_result_thread);
         
-        double t3, t4;
-        t3 = realtime_msec();
         pthread_join(soft_sw_tid, NULL);
         for(i = 0; i < 10; i++)
             pthread_join(sw_tid[i], NULL);
-        t4 = realtime_msec();
-        fprintf(stderr, "t2-t1=%.3f msec\n", t4-t3);
-        multi_thread_time[step1_i] += (t4 - t2);
+
 
         if(params.read_num == 0) {
             fprintf(stderr, "all read ok!\n");
@@ -687,15 +619,14 @@ static void *worker_pipeline(void *shared, int step, void *in)
         free(params.read_contexts);
         free(params.chain_num);
         free(params.read_flag);
-        end = realtime_msec();
-        step1[step1_i++] = end - start;
+
         fprintf(stderr, "exit step 1\n");
 		return in;
     } else if (step == 2) { // step 2: output
 		void *km = 0;
         step_t *s = (step_t*)in;
 		const mm_idx_t *mi = p->mi;
-        start = realtime_msec();
+
         fprintf(stderr, "entry step 2\n");
 		for (i = 0; i < p->n_threads; ++i) mm_tbuf_destroy(s->buf[i]);
 		free(s->buf);
@@ -729,8 +660,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		}
 		free(s->reg); free(s->n_reg); free(s->seq); // seg_off and n_seg were allocated with reg; no memory leak here
 		km_destroy(km);
-        end = realtime_msec();
-        step2[step2_i++] = end - start;
+
         fprintf(stderr, "exit step 2\n");
 		if (mm_verbose >= 3)
 			fprintf(stderr, "[M::%s::%.3f*%.2f] mapped %d sequences\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), s->n_seq);
@@ -1035,18 +965,14 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
     mm_set_mapq(km, context->n_regs0, context->regs0, context->opt->min_chain_score, context->opt->a, context->rep_len, is_sr);
     *(context->n_regs) = context->n_regs0;           //保存结果
     context->regs[0] = context->regs0;  //保存结果
-    //销毁该read下的所有上下文和结果
-    /*for() {
+    
+    int i = 0;
+    destroy_context(context);
+    for(i = 0; i < num; i++) {
+        sw_result_t* result = read_result->chain_results[i];
         destroy_results(result);
-        //销毁结果数组和所有上下文
-        destroy_chain_context(chain_context);
-        context->chain_contexts[chain_i] = NULL;
-    }*/
-    free(context->a);
-    free(context->regs0_ori);
-    free(context->a_ori);
-    free(context->seq);
-    free(context);
+    }
+    free(read_result->chain_results);
     return 1;
 }
 
