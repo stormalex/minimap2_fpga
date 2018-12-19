@@ -12,6 +12,7 @@
 
 typedef struct _sw_context_t sw_context_t;
 typedef struct _chain_context_t chain_context_t;
+typedef struct _sw_result_t sw_result_t;
 
 typedef struct _context_t{
     //原始数据
@@ -68,10 +69,14 @@ typedef struct _chain_context_t{
     int sw_num;
     int sw_size;
     sw_context_t** sw_contexts;     //保存该chain下每条sw的上下文
+    
+    int soft_sw_num;   //表示有多少个sw的任务单独由软件处理
+    sw_result_t* soft_sw_result;    //指向的数据为软件处理的sw的结果
 }chain_context_t;
 
 typedef struct {
-
+    int sw_index;       //表示该条sw是整个chain的第几个sw任务，此信息随结果返回后，将fpga计算结果替换
+    
     int qlen;
     uint8_t* query;     //指向sw上下文的query
     int tlen;
@@ -127,16 +132,16 @@ typedef struct {
     int sw_num;
     int sw_size;
     sw_task_t** sw_tasks;
-    int flag;   //0:fpga    1:soft  3:最后一个任务
 }chain_sw_task_t;
 
-typedef struct {
+typedef struct _sw_result_t{
     long read_id;
     int chain_id;
 
     int result_num;
     int result_size;
     ksw_extz_t** ezs;
+    int* sw_index;   //与ezs对应的数组，如果是正数，则表示对应的ezs是chain中的第几个sw结果，如果是负数，则没有意义
 }sw_result_t;
 
 typedef struct {
@@ -187,7 +192,7 @@ void destroy_chain_sw_task(chain_sw_task_t* chain_sw_task);
 sw_result_t* create_result();
 
 //向result中加入一个ez结果
-void add_result(sw_result_t* result, ksw_extz_t* ez);
+void add_result(sw_result_t* result, ksw_extz_t* ez, int sw_index);
 
 //销毁一个chain的所有result
 void destroy_results(sw_result_t* result);

@@ -385,13 +385,7 @@ int main(int argc, char *argv[])
     init_result_array();
     init_fpga_task_array();
     init_fpga_result_array();
-#if 0
-    pthread_t sw_tid[1];
-    int thread_i = 0;
-    for(thread_i = 0; thread_i < 1; thread_i++) {
-        pthread_create(&sw_tid[thread_i], NULL, sw_thread, NULL);
-    }
-#else
+
 #if !DUMP_FILE
     int ret = fpga_init(BLOCK);
     if(ret) {
@@ -422,7 +416,7 @@ int main(int argc, char *argv[])
     pthread_t send_tid, recv_tid;
     pthread_create(&send_tid, NULL, send_task_thread, NULL);
     pthread_create(&recv_tid, NULL, recv_task_thread, NULL);
-#endif
+
     while ((mi = mm_idx_reader_read(idx_rdr, n_threads)) != 0) {
 		if ((opt.flag & MM_F_CIGAR) && (mi->flag & MM_I_NO_SEQ)) {
 			fprintf(stderr, "[ERROR] the prebuilt index doesn't contain sequences.\n");
@@ -458,12 +452,6 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "[ERROR] failed to write the results\n");
 		exit(EXIT_FAILURE);
 	}
-#if 0
-    stop_sw_thread();
-    for(thread_i = 0; thread_i < 1; thread_i++) {
-        pthread_join(sw_tid[thread_i], NULL);
-    }
-#else
     
     stop_fpga_recv_thread();
     stop_fpga_send_thread();
@@ -481,7 +469,7 @@ int main(int argc, char *argv[])
     //fpga_set_block();
     fpga_finalize();
 #endif
-#endif
+
 
 	if (mm_verbose >= 3) {
 		fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);

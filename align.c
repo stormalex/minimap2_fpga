@@ -517,7 +517,8 @@ void send_to_fpga(chain_sw_task_t* tasks[], int chain_num, int data_size)
     fpga_task.data = (void*)fpga_buf;
     fpga_task.size = data_size + 4096;
     while(send_fpga_task(fpga_task)) {
-        usleep(500);
+        usleep(5000);
+        ;
     }
 }
 
@@ -598,7 +599,8 @@ void last_send(void *data, int tid)
     fpga_task.data = (void*)fpga_buf;
     fpga_task.size = data_size + 4096;
     while(send_fpga_task(fpga_task)) {
-        usleep(500);
+        usleep(5000);
+        ;
     }
     
     params->send_task[tid].num = 0;
@@ -666,6 +668,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	int32_t rs, re, qs, qe;
 	int32_t rs1, qs1, re1, qe1;
 	int8_t mat[25];
+    int sw_index = 0;
 
     start = realtime_msec();
     
@@ -783,6 +786,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
     //创建一个chain的sw任务
     int small;
     chain_sw_task_t* chain_task = create_chain_sw_task(read_index, chain_index);
+    chain_sw_task_t* soft_sw_task = create_chain_sw_task(read_index, chain_index);
     //context->tseq = tseq;
 
     memcpy(context->mat, mat, sizeof(context->mat));
@@ -830,9 +834,24 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         small = VSCMIN(sw_task->qlen, sw_task->tlen);
         small = VSCMIN(small, sw_task->w);
         if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
-            chain_task->flag = 1;
+            chain_context->soft_sw_num++;
+            
+            //造一个小的激励让fpga做，保持chain task数据和结果的完整性
+            sw_task_t* tmp_sw_task = create_sw_task(100, sw_context->query, 100, sw_context->target,
+                                                    mat, opt->q, opt->e, opt->q2, opt->e2, 75, 
+                                                    r->split_inv? opt->zdrop_inv : opt->zdrop,
+                                                    opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
+                                                    0);
+            add_sw_task(chain_task, tmp_sw_task);
+            
+            //设置该sw的index值，用来进行结果替换
+            sw_task->sw_index = sw_index;
+            add_sw_task(soft_sw_task, sw_task);
         }
-        add_sw_task(chain_task, sw_task);
+        else {
+            add_sw_task(chain_task, sw_task);
+        }
+        sw_index++;
 		/*mm_align_pair(km, opt, qs - qs0, qseq, rs - rs0, tseq, mat, bw, opt->end_bonus, r->split_inv? opt->zdrop_inv : opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, ez);
         if (ez->n_cigar > 0) {
 			mm_append_cigar(r, ez->n_cigar, ez->cigar);
@@ -909,9 +928,22 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
                 small = VSCMIN(sw_task->qlen, sw_task->tlen);
                 small = VSCMIN(small, sw_task->w);
                 if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
-                    chain_task->flag = 1;
+                    chain_context->soft_sw_num++;
+                    //造一个小的激励让fpga做，保持chain task数据和结果的完整性
+                    sw_task_t* tmp_sw_task = create_sw_task(100, sw_context->query, 100, sw_context->target,
+                                                            mat, opt->q, opt->e, opt->q2, opt->e2, 75, 
+                                                            r->split_inv? opt->zdrop_inv : opt->zdrop,
+                                                            opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
+                                                            0);
+                    add_sw_task(chain_task, tmp_sw_task);
+                    //设置该sw的index值，用来进行结果替换
+                    sw_task->sw_index = sw_index;
+                    add_sw_task(soft_sw_task, sw_task);
                 }
-                add_sw_task(chain_task, sw_task);
+                else {
+                    add_sw_task(chain_task, sw_task);
+                }
+                sw_index++;
                 //mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
             }
 			// test Z-drop and inversion Z-drop
@@ -980,9 +1012,22 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
         small = VSCMIN(sw_task->qlen, sw_task->tlen);
         small = VSCMIN(small, sw_task->w);
         if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
-            chain_task->flag = 1;
+            chain_context->soft_sw_num++;
+            //造一个小的激励让fpga做，保持chain task数据和结果的完整性
+            sw_task_t* tmp_sw_task = create_sw_task(64, sw_context->query, 64, sw_context->target,
+                                                    mat, opt->q, opt->e, opt->q2, opt->e2, 75, 
+                                                    r->split_inv? opt->zdrop_inv : opt->zdrop,
+                                                    opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
+                                                    0);
+            add_sw_task(chain_task, tmp_sw_task);
+            //设置该sw的index值，用来进行结果替换
+            sw_task->sw_index = sw_index;
+            add_sw_task(soft_sw_task, sw_task);
         }
-        add_sw_task(chain_task, sw_task);
+        else {
+            add_sw_task(chain_task, sw_task);
+        }
+        sw_index++;
 		/*mm_align_pair(km, opt, qe0 - qe, qseq, re0 - re, tseq, mat, bw, opt->end_bonus, opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY, ez);
 		if (ez->n_cigar > 0) {
 			mm_append_cigar(r, ez->n_cigar, ez->cigar);
@@ -1016,37 +1061,39 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 		if (rev && r->p->trans_strand)
 			r->p->trans_strand ^= 3; // flip to the read strand
 	}*/
-    if(chain_task->flag == 1) {
+    
+    //先做软件的sw任务，保证硬件处理完成后软件已经有了结果
+    if(soft_sw_task->sw_num > 0) {
         int index = 0;
         start = realtime_msec();
         sw_result_t* result = create_result();
-        for(index = 0; index < chain_task->sw_num; index++) {
+        for(index = 0; index < soft_sw_task->sw_num; index++) {
             ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
             memset(ez, 0, sizeof(ksw_extz_t));
-            sw_task_t* task = chain_task->sw_tasks[index];
-            
+            sw_task_t* task = soft_sw_task->sw_tasks[index];
             ksw_extd2_sse(NULL, task->qlen, task->query, task->tlen, task->target, 5, task->mat, task->q, task->e, task->q2, task->e2, task->w, task->zdrop, task->end_bonus, task->flag, ez);
 
-            add_result(result, ez);
+            add_result(result, ez, soft_sw_task->sw_tasks[index]->sw_index);
         }
-        result->read_id = chain_task->read_id;
-        result->chain_id = chain_task->chain_id;
-
-        destroy_chain_sw_task(chain_task);
+        result->read_id = soft_sw_task->read_id;
+        result->chain_id = soft_sw_task->chain_id;
+        
+        destroy_chain_sw_task(soft_sw_task);
         pthread_mutex_lock(&long_chain_mutex);
         long_chain_counter++;
         pthread_mutex_unlock(&long_chain_mutex);
-        while(send_result(result));
+        chain_context->soft_sw_result = result;     //将软件处理的sw结果挂在chain context上
         end = realtime_msec();
         sw_soft_time[tid] += (end - start);
     }
-    else {
+    if(chain_task->sw_num > 0) {
         double start, end;
         start = realtime_msec();
         process_task(send_task, chain_task, tid, read_index, read_num);  //将任务放到待发送队列
         end = realtime_msec();
         process_task_time[tid] += (end - start);
     }
+    
 	kfree(km, tseq);
 }
 
@@ -1495,7 +1542,8 @@ void mm_align2(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, u
 	int32_t rs, re, qs, qe;
 	int32_t rs1, qs1, re1, qe1;
 	int8_t mat[25];
-    
+    int sw_index = 0;
+
 	if (is_sr) assert(!(mi->flag & MM_I_HPC)); // HPC won't work with SR because with HPC we can't easily tell if there is a gap
 
 	r2->cnt = 0;
@@ -1610,7 +1658,8 @@ void mm_align2(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, u
     //创建一个chain的sw任务
     int small;
     chain_sw_task_t* chain_task = create_chain_sw_task(read_index, chain_index);
-
+    chain_sw_task_t* soft_sw_task = create_chain_sw_task(read_index, chain_index);
+    
     chain_context->rs = rs;
     chain_context->qs = qs;
     chain_context->qs0 = qs0;
@@ -1654,9 +1703,22 @@ void mm_align2(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, u
         small = VSCMIN(sw_task->qlen, sw_task->tlen);
         small = VSCMIN(small, sw_task->w);
         if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
-            chain_task->flag = 1;
+            chain_context->soft_sw_num++;
+            //造一个小的激励让fpga做，保持chain task数据和结果的完整性
+            sw_task_t* tmp_sw_task = create_sw_task(100, sw_context->query, 100, sw_context->target,
+                                                    mat, opt->q, opt->e, opt->q2, opt->e2, 75, 
+                                                    r->split_inv? opt->zdrop_inv : opt->zdrop,
+                                                    opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
+                                                    0);
+            add_sw_task(chain_task, tmp_sw_task);
+            //设置该sw的index值，用来进行结果替换
+            sw_task->sw_index = sw_index;
+            add_sw_task(soft_sw_task, sw_task);
         }
-        add_sw_task(chain_task, sw_task);
+        else {
+            add_sw_task(chain_task, sw_task);
+        }
+        sw_index++;
 		/*mm_align_pair(km, opt, qs - qs0, qseq, rs - rs0, tseq, mat, bw, opt->end_bonus, r->split_inv? opt->zdrop_inv : opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, ez);
         if (ez->n_cigar > 0) {
 			mm_append_cigar(r, ez->n_cigar, ez->cigar);
@@ -1733,9 +1795,22 @@ void mm_align2(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, u
                 small = VSCMIN(sw_task->qlen, sw_task->tlen);
                 small = VSCMIN(small, sw_task->w);
                 if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
-                    chain_task->flag = 1;
+                    chain_context->soft_sw_num++;
+                    //造一个小的激励让fpga做，保持chain task数据和结果的完整性
+                    sw_task_t* tmp_sw_task = create_sw_task(100, sw_context->query, 100, sw_context->target,
+                                                            mat, opt->q, opt->e, opt->q2, opt->e2, 75, 
+                                                            r->split_inv? opt->zdrop_inv : opt->zdrop,
+                                                            opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
+                                                            0);
+                    add_sw_task(chain_task, tmp_sw_task);
+                    //设置该sw的index值，用来进行结果替换
+                    sw_task->sw_index = sw_index;
+                    add_sw_task(soft_sw_task, sw_task);
                 }
-                add_sw_task(chain_task, sw_task);
+                else {
+                    add_sw_task(chain_task, sw_task);
+                }
+                sw_index++;
                 //mm_align_pair(km, opt, qe - qs, qseq, re - rs, tseq, mat, bw1, -1, opt->zdrop, extra_flag|KSW_EZ_APPROX_MAX, ez); // first pass: with approximate Z-drop
             }
 			// test Z-drop and inversion Z-drop
@@ -1804,9 +1879,22 @@ void mm_align2(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, u
         small = VSCMIN(sw_task->qlen, sw_task->tlen);
         small = VSCMIN(small, sw_task->w);
         if(sw_task->qlen >= 16300 || sw_task->tlen >= 16300 || small>=1024) {
-            chain_task->flag = 1;
+            chain_context->soft_sw_num++;
+            //造一个小的激励让fpga做，保持chain task数据和结果的完整性
+            sw_task_t* tmp_sw_task = create_sw_task(100, sw_context->query, 100, sw_context->target,
+                                                    mat, opt->q, opt->e, opt->q2, opt->e2, 75, 
+                                                    r->split_inv? opt->zdrop_inv : opt->zdrop,
+                                                    opt->end_bonus, extra_flag|KSW_EZ_EXTZ_ONLY|KSW_EZ_RIGHT|KSW_EZ_REV_CIGAR, 
+                                                    0);
+            add_sw_task(chain_task, tmp_sw_task);
+            //设置该sw的index值，用来进行结果替换
+            sw_task->sw_index = sw_index;
+            add_sw_task(soft_sw_task, sw_task);
         }
-        add_sw_task(chain_task, sw_task);
+        else {
+            add_sw_task(chain_task, sw_task);
+        }
+        sw_index++;
 		/*mm_align_pair(km, opt, qe0 - qe, qseq, re0 - re, tseq, mat, bw, opt->end_bonus, opt->zdrop, extra_flag|KSW_EZ_EXTZ_ONLY, ez);
 		if (ez->n_cigar > 0) {
 			mm_append_cigar(r, ez->n_cigar, ez->cigar);
@@ -1837,29 +1925,31 @@ void mm_align2(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, u
 		if (rev && r->p->trans_strand)
 			r->p->trans_strand ^= 3; // flip to the read strand
 	}*/
-    if(chain_task->flag == 1) {
+    //先做软件的sw任务，保证硬件处理完成后软件已经有了结果
+    if(soft_sw_task->sw_num > 0) {
         int index = 0;
         sw_result_t* result = create_result();
-        for(index = 0; index < chain_task->sw_num; index++) {
+        for(index = 0; index < soft_sw_task->sw_num; index++) {
             ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
             memset(ez, 0, sizeof(ksw_extz_t));
-            sw_task_t* task = chain_task->sw_tasks[index];
+            sw_task_t* task = soft_sw_task->sw_tasks[index];
             
             ksw_extd2_sse(NULL, task->qlen, task->query, task->tlen, task->target, 5, task->mat, task->q, task->e, task->q2, task->e2, task->w, task->zdrop, task->end_bonus, task->flag, ez);
 
-            add_result(result, ez);
+            add_result(result, ez, soft_sw_task->sw_tasks[index]->sw_index);
         }
-        result->read_id = chain_task->read_id;
-        result->chain_id = chain_task->chain_id;
+        result->read_id = soft_sw_task->read_id;
+        result->chain_id = soft_sw_task->chain_id;
 
-        destroy_chain_sw_task(chain_task);
-        while(send_result(result));
+        destroy_chain_sw_task(soft_sw_task);
+        chain_context->soft_sw_result = result;     //将软件处理的sw结果挂在chain context上
     }
-    else {
+    if(chain_task->sw_num > 0) {
 
         //process_task(send_task, chain_task, read_index);  //将任务放到待发送队列
         send_to_fpga(&chain_task, 1, chain_task->data_size);
 
     }
+    
 	kfree(km, tseq);
 }

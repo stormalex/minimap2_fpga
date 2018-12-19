@@ -544,7 +544,6 @@ extern double step1[100];
 extern double step2[100];
 
 void last_send(void *params, int tid);
-void* soft_sw_result_thread(void* arg);
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
@@ -652,8 +651,6 @@ static void *worker_pipeline(void *shared, int step, void *in)
             pthread_create(&sw_tid[i], NULL, sw_result_thread, &params);
         }
         
-        pthread_t soft_sw_tid;
-        pthread_create(&soft_sw_tid, NULL, soft_sw_result_thread, &params);
 
         t2 = realtime_msec();
         mem_init_time += (t2 - start);
@@ -663,7 +660,6 @@ static void *worker_pipeline(void *shared, int step, void *in)
         
         double t3, t4;
         t3 = realtime_msec();
-        pthread_join(soft_sw_tid, NULL);
         for(i = 0; i < 10; i++)
             pthread_join(sw_tid[i], NULL);
         t4 = realtime_msec();
@@ -806,8 +802,6 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
         chain_context_t* chain_context = context->chain_contexts[chain_i];
         sw_context_t** sw_contexts = chain_context->sw_contexts;
         sw_result_t* result = read_result->chain_results[chain_i];
-
-        int result_num = result->result_num;
         
         int32_t rs1, qs1, re1, qe1;
         int32_t dropped = 0;
@@ -829,7 +823,6 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
         
         
         if(sw_contexts[0]->pos_flag == 0) {  //left
-            result_num--;
             k = 1;  //有左扩展
             ksw_extz_t* ez = result->ezs[0];
             sw_context_t* sw_context = sw_contexts[0];
@@ -860,7 +853,6 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
 
         for(; k < result->result_num; k++) {    //gap
             if(sw_contexts[k]->pos_flag == 1) {
-                result_num--;
                 int zdrop_code;
                 ksw_extz_t tmp_ez;
                 memset(&tmp_ez, 0, sizeof(tmp_ez));
@@ -896,7 +888,6 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
                     mm_append_cigar(r, ez->n_cigar, ez->cigar);
                 if (ez->zdropped) { // truncated by Z-drop; TODO: sometimes Z-drop kicks in because the next seed placement is wrong. This can be fixed in principle.
                     for (j = i - 1; j >= 0; --j) {
-                        //fprintf(stderr, "a=%p as1=%d j=%d a[as1 + j].x=%d rs=%d rs+ez->max_t=%d\n", a, as1, j, (int32_t)a[as1 + j].x, rs, rs + ez->max_t);
                         if ((int32_t)a[as1 + j].x <= rs + ez->max_t){
                             if(zdrop_code != 0) {
                                 if(tmp_ez.cigar != NULL) {
@@ -944,7 +935,6 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
         
         if(sw_contexts[k]->pos_flag == 2) {      //right
             if(!dropped) {
-                result_num--;
                 ksw_extz_t* ez = result->ezs[k];
                 sw_context_t* sw_context = sw_contexts[k];
                 int32_t re = sw_context->re;
@@ -1053,6 +1043,8 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
 //返回0表示执行成功 返回1表示所有read处理完成
 int save_chain_result(sw_result_t* result, user_params_t* params, long read_num)
 {
+    int i = 0;
+    int j = 0;
     long read_index = result->read_id;
     int chain_id = result->chain_id;
     //fprintf(stderr, "read_num=%ld\n", read_num);
@@ -1065,6 +1057,43 @@ int save_chain_result(sw_result_t* result, user_params_t* params, long read_num)
     if(chain_result_num == params->chain_num[read_index]) {
         //处理一条read的结果
         context_t* context = params->read_contexts[read_index];
+        
+        //检查所有chain context是否有软件做的sw任务，如果有，用软件的sw结果替换硬件的sw结果
+        for(i = 0; i < chain_result_num; i++) {
+            chain_context_t* chain_context = context->chain_contexts[i];
+            if(chain_context->soft_sw_num > 0) {
+                sw_result_t* fpga_sw_result = params->read_results[read_index].chain_results[i];
+                sw_result_t* soft_sw_result = chain_context->soft_sw_result;
+                
+                for(j = 0; j < chain_context->soft_sw_num; j++) {
+                    
+                    int sw_index = soft_sw_result->sw_index[j];
+                    if(sw_index < 0) {
+                        fprintf(stderr, "invalid sw index:%d, read_index:%ld, chain:%d\n", sw_index, read_index, i);
+                        assert(sw_index>=0);
+                    }
+                    //替换ez及cigar
+                    free(fpga_sw_result->ezs[sw_index]->cigar);
+                    fpga_sw_result->ezs[sw_index]->n_cigar = soft_sw_result->ezs[j]->n_cigar;
+                    fpga_sw_result->ezs[sw_index]->zdropped = soft_sw_result->ezs[j]->zdropped;
+                    fpga_sw_result->ezs[sw_index]->max_q = soft_sw_result->ezs[j]->max_q;
+                    fpga_sw_result->ezs[sw_index]->max_t = soft_sw_result->ezs[j]->max_t;
+                    fpga_sw_result->ezs[sw_index]->mte = soft_sw_result->ezs[j]->mte_q;
+                    fpga_sw_result->ezs[sw_index]->score = soft_sw_result->ezs[j]->score;
+                    fpga_sw_result->ezs[sw_index]->reach_end = soft_sw_result->ezs[j]->reach_end;
+                    fpga_sw_result->ezs[sw_index]->m_cigar = soft_sw_result->ezs[j]->n_cigar + 1;
+                    fpga_sw_result->ezs[sw_index]->revcigar = 0;
+                    fpga_sw_result->ezs[sw_index]->cigar = (uint32_t*)malloc(fpga_sw_result->ezs[sw_index]->m_cigar * sizeof(uint32_t));
+                    memcpy(fpga_sw_result->ezs[sw_index]->cigar, soft_sw_result->ezs[j]->cigar, fpga_sw_result->ezs[sw_index]->n_cigar * sizeof(uint32_t));
+                    
+                    
+                }
+                destroy_results(soft_sw_result);
+                chain_context->soft_sw_result = NULL;
+                chain_context->soft_sw_num = 0;
+            }
+        }
+        
         //fprintf(stderr, "read_id=%ld\n", read_index);
         int ret = save_read_result(read_index, &params->read_results[read_index], context, params->chain_num[read_index],
                                    &params->read_flag[read_index], &params->chain_num[read_index]);
@@ -1128,12 +1157,6 @@ static void* sw_result_thread(void* arg)
             continue;
         }
         fpga_buf = (char*)result_data.data;
-        //fpga_len = result_data.size;
-        
-        /*char* tmp_buf = (char*)malloc(4*1024*1024);
-        memcpy(tmp_buf, fpga_buf, fpga_len + 4096);
-        fpga_release_retbuf(fpga_buf);
-        fpga_buf = tmp_buf;*/
 
         __sync_sub_and_fetch(&g_process_task_num, 1);   //fpga任务数减1
         
@@ -1176,7 +1199,7 @@ static void* sw_result_thread(void* arg)
 
                 p = (char*)cigar_addr;
                 cigar_addr = (uint32_t *)(p + ADDR_ALIGN(ez->n_cigar*sizeof(uint32_t), 16));  //移动到下一个cigar开头
-                add_result(result, ez); //将ez结果加入到chain结果中
+                add_result(result, ez, -1); //将ez结果加入到chain结果中
             }
           
             ret = save_chain_result(result, params, read_num);
@@ -1192,30 +1215,6 @@ static void* sw_result_thread(void* arg)
         }
         //fpga_release_retbuf(fpga_buf);
         free(fpga_buf);
-    }
-    return NULL;
-}
-
-void* soft_sw_result_thread(void* arg)
-{
-    int ret = 0;
-    user_params_t *params = (user_params_t *)arg;
-    sw_result_t* result = NULL;
-    long read_num = params->read_num;
-    
-    while(params->exit) {
-        result = get_result();
-        if(result == NULL) {
-            usleep(500);
-            continue;
-        }
-        ret = save_chain_result(result, params, read_num);
-        if(ret == 1) {
-            fprintf(stderr, "2.all read process complete\n");
-            params->exit = 0;
-            //fpga_exit_block();  //唤醒所有等待的线程
-            return NULL;
-        }
     }
     return NULL;
 }

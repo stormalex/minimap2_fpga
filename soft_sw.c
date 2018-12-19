@@ -17,8 +17,6 @@
 
 #include "soft_sw.h"
 
-static int sw_stop_flag = 1;
-
 //保存上下文的数组
 static context_t* context_array[CONTEXT_NUM];
 static pthread_mutex_t context_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -89,7 +87,7 @@ int send_task(chain_sw_task_t* chain_sw_tasks)
     if (task_is_full()) {
         pthread_mutex_unlock(&tasks_mutex);
         //fprintf(stderr, "task ringbuf is full\n");
-        usleep(500);
+        usleep(5000);
         return -1;
     }
     total_send_task++;
@@ -109,7 +107,7 @@ chain_sw_task_t* get_task()
     if (task_is_empty()) {
         pthread_mutex_unlock(&tasks_mutex);
         //fprintf(stderr, "task ringbuf is empty\n");
-        usleep(500);
+        usleep(5000);
         return NULL;
     }
     total_recv_task++;
@@ -155,7 +153,7 @@ int send_result(sw_result_t* results)
     if (result_is_full()) {
         pthread_mutex_unlock(&results_mutex);
         //fprintf(stderr, "result ringbuf is full\n");
-        usleep(500);
+        usleep(5000);
         return -1;
     }
     total_send_result++;
@@ -175,7 +173,7 @@ sw_result_t* get_result()
     pthread_mutex_lock(&results_mutex);
     if (result_is_empty()) {
         pthread_mutex_unlock(&results_mutex);
-        usleep(500);
+        usleep(5000);
         //fprintf(stderr, "result ringbuf is empty\n");
         return NULL;
     }
@@ -260,7 +258,6 @@ chain_sw_task_t* create_chain_sw_task(long read_id, int chain_id)
         new_chain_sw_task->chain_id = chain_id;
         new_chain_sw_task->sw_num = 0;
         new_chain_sw_task->sw_size = 32;
-        new_chain_sw_task->flag = 0;
         new_chain_sw_task->sw_tasks = (sw_task_t**)malloc(new_chain_sw_task->sw_size * sizeof(sw_task_t*));
     }
     return new_chain_sw_task;
@@ -303,11 +300,12 @@ sw_result_t* create_result()
         new_result->result_num = 0;
         new_result->result_size = 32;
         new_result->ezs = (ksw_extz_t**)malloc(new_result->result_size * sizeof(ksw_extz_t*));
+        new_result->sw_index = (int*)malloc(new_result->result_size * sizeof(int));
     }
     return new_result;
 }
 
-void add_result(sw_result_t* result, ksw_extz_t* ez)
+void add_result(sw_result_t* result, ksw_extz_t* ez, int sw_index)
 {
     if(result != NULL && ez != NULL) {
         if(result->result_size == 0)
@@ -316,8 +314,10 @@ void add_result(sw_result_t* result, ksw_extz_t* ez)
             result->result_size = result->result_size*2;
             //fprintf(stderr, "result->result_size=%d\n", result->result_size);
             result->ezs = (ksw_extz_t**)realloc(result->ezs, result->result_size * sizeof(ksw_extz_t*));
+            result->sw_index = (int*)realloc(result->sw_index, result->result_size * sizeof(int));
         }
         result->ezs[result->result_num] = ez;
+        result->sw_index[result->result_num] = sw_index;
         result->result_num++;
     }
     return;
@@ -331,6 +331,7 @@ void destroy_results(sw_result_t* result)
             free(result->ezs[i]->cigar);
             free(result->ezs[i]);
         }
+        free(result->sw_index);
         free(result->ezs);
         free(result);
     }
@@ -388,6 +389,7 @@ chain_context_t* create_chain_context()
 {
     chain_context_t* chain_context = (chain_context_t *)malloc(sizeof(chain_context_t));
     if(chain_context != NULL) {
+        memset(chain_context, 0, sizeof(chain_context_t));
         chain_context->sw_num = 0;
         chain_context->sw_size = 16;
         chain_context->sw_contexts = (sw_context_t**)malloc(chain_context->sw_size * sizeof(sw_context_t*));
@@ -442,38 +444,4 @@ void destroy_chain_context(chain_context_t* chain_context)
             chain_context->qseq0[0] = NULL;
         }
     }
-}
-
-void stop_sw_thread()
-{
-    sw_stop_flag = 0;
-}
-
-void* sw_thread(void* arg)
-{
-    int i = 0;
-    
-    while(sw_stop_flag)
-    {
-        chain_sw_task_t* chain_tasks = get_task();
-        if(chain_tasks == NULL)
-            continue;
-        sw_result_t* result = create_result();
-        //fprintf(stderr, "sw task num=%d\n", chain_tasks->sw_num);
-        for(i = 0; i < chain_tasks->sw_num; i++) {
-            ksw_extz_t* ez = (ksw_extz_t*)malloc(sizeof(ksw_extz_t));
-            memset(ez, 0, sizeof(ksw_extz_t));
-            sw_task_t* task = chain_tasks->sw_tasks[i];
-            
-            ksw_extd2_sse(NULL, task->qlen, task->query, task->tlen, task->target, 5, task->mat, task->q, task->e, task->q2, task->e2, task->w, task->zdrop, task->end_bonus, task->flag, ez);
-
-            add_result(result, ez);
-        }
-        result->read_id = chain_tasks->read_id;
-        result->chain_id = chain_tasks->chain_id;
-
-        destroy_chain_sw_task(chain_tasks);
-        while(send_result(result));
-    }
-    return NULL;
 }

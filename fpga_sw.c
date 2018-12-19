@@ -19,6 +19,7 @@
 #include "fpga_sw.h"
 #include "soft_sw.h"
 
+//mat[0]=2, mat[1]=-4
 void sw(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
 				   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez)
 {
@@ -781,7 +782,7 @@ void* recv_task_thread(void *arg)
 
                 p = (char*)cigar_addr;
                 cigar_addr = (uint32_t *)(p + ADDR_ALIGN(ez->n_cigar*sizeof(uint32_t), 16));  //移动到下一个cigar开头
-                add_result(result, ez); //将ez结果加入到chain结果中
+                add_result(result, ez, -1); //将ez结果加入到chain结果中
                 ez_num++;
                 cigar_num += ez->n_cigar;
             }
@@ -848,7 +849,7 @@ int send_fpga_task(task_t task)
     pthread_mutex_lock(&tasks_mutex);
     if (fpga_task_is_full()) {
         pthread_mutex_unlock(&tasks_mutex);
-        usleep(500);
+        usleep(5000);
         return -1;
     }
     tasks[tasks_tail] = task;
@@ -863,7 +864,7 @@ int get_fpga_task(task_t* task)
     pthread_mutex_lock(&tasks_mutex);
     if (fpga_task_is_empty()) {
         pthread_mutex_unlock(&tasks_mutex);
-        usleep(500);
+        usleep(5000);
         return 1;
     }
     *task = tasks[tasks_head];
@@ -899,7 +900,7 @@ void* send_task_thread(void* arg)
         pthread_mutex_lock(&count_mutex);
         while(fpga_task_count >= 512){
             pthread_mutex_unlock(&count_mutex);
-            usleep(500);
+            usleep(5000);
             continue;
         }
         
@@ -946,7 +947,7 @@ int send_fpga_result(result_t result)
     pthread_mutex_lock(&result_mutex);
     if (fpga_result_is_full()) {
         pthread_mutex_unlock(&result_mutex);
-        usleep(500);
+        usleep(5000);
         return -1;
     }
     results[result_tail] = result;
@@ -961,7 +962,7 @@ int get_fpga_result(result_t* result)
     pthread_mutex_lock(&result_mutex);
     if (fpga_result_is_empty()) {
         pthread_mutex_unlock(&result_mutex);
-        usleep(500);
+        usleep(5000);
         return 1;
     }
     *result = results[result_head];
@@ -998,7 +999,7 @@ void* recv_task_thread(void* arg)
         
         reg_data = fpga_read_reg(0x300);
         if(reg_data == 0) {
-            usleep(500);
+            usleep(5000);
             continue;
         }
         size = (reg_data & HIGH_MASK) >> FPGA_SIZE_OFFSET;

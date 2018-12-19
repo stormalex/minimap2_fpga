@@ -13,7 +13,7 @@
 
 typedef struct {
     unsigned long long tag;     //包的标记，可以用来标记唯一一个包
-    int check_id;
+    int check_id;               //0x1234ABCD：表示是以chain为单位的任务包 0xABCD1234：表示是以sw为单位的任务包
     int chain_task_num;         //标记任务中有几个chain
     int sw_num;                 //标记任务中有几个sw任务
 }fpga_task_t;
@@ -23,6 +23,12 @@ typedef struct {
     unsigned int chain_id;      //标记该任务的chain编号
     unsigned int sw_num;        //标记该chain下有几个sw任务
 }fpga_task_id_t;
+
+typedef struct {    //此结构用来记录每个sw属于哪条read 哪条chain 并且是第几条sw
+    unsigned long read_id;      //标记该任务的read编号
+    unsigned int chain_id;      //标记该任务的chain编号
+    unsigned int sw_id;         //标记该sw任务是该chain下的第几条sw
+}fpga_sw_task_id_t;
 
 typedef struct {
     unsigned short qlen;
