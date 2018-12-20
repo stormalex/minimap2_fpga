@@ -1025,18 +1025,14 @@ static int save_read_result(long read_id, read_result_t* read_result, context_t*
     mm_set_mapq(km, context->n_regs0, context->regs0, context->opt->min_chain_score, context->opt->a, context->rep_len, is_sr);
     *(context->n_regs) = context->n_regs0;           //保存结果
     context->regs[0] = context->regs0;  //保存结果
-    //销毁该read下的所有上下文和结果
-    /*for() {
+    
+    int i = 0;
+    destroy_context(context);
+    for(i = 0; i < num; i++) {
+        sw_result_t* result = read_result->chain_results[i];
         destroy_results(result);
-        //销毁结果数组和所有上下文
-        destroy_chain_context(chain_context);
-        context->chain_contexts[chain_i] = NULL;
-    }*/
-    free(context->a);
-    free(context->regs0_ori);
-    free(context->a_ori);
-    free(context->seq);
-    free(context);
+    }
+    free(read_result->chain_results);
     return 1;
 }
 

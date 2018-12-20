@@ -364,7 +364,21 @@ void add_chain_context(context_t* context, chain_context_t* chain_context)
         chain_context->context = context;   //指向了这个read的上下文
     }
 }
+void destroy_context(context_t* context)
+{
+    int i = 0;
 
+    for(i = 0; i < context->chain_num; i++) {
+        destroy_chain_context(context->chain_contexts[i]);
+    }
+    free(context->chain_contexts);
+
+    free(context->a);
+    free(context->regs0_ori);
+    free(context->a_ori);
+    free(context->seq);
+    free(context);
+}
 void insert_chain_context(context_t* context, chain_context_t* chain_context, int pos)
 {
     if(pos > context->chain_num) {
