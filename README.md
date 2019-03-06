@@ -4,6 +4,12 @@
 [![Build Status](https://travis-ci.org/lh3/minimap2.svg?branch=master)](https://travis-ci.org/lh3/minimap2)
 ## <a name="started"></a>Getting Started
 ```sh
+
+sw模式
+master分支，可运行的分支
+BRANCH_MINIMAP_ALL_SW_TO_FPGA分支，在master基础上将所有任务放在了fpga，最优化版本
+BRANCH_MINIMAP_DUMP_SW分支，dump sw的测试数据的版本
+
 git clone https://github.com/lh3/minimap2
 cd minimap2 && make
 # long sequences against a reference genome
